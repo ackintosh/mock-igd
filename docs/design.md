@@ -1,45 +1,45 @@
-# mock-igd 設計ドキュメント
+# mock-igd Design Document
 
-## 概要
+## Overview
 
-UPnP IGD（Internet Gateway Device）のモックサーバー。クライアント実装のテストに使用する。
+A mock server for UPnP IGD (Internet Gateway Device). Used for testing client implementations.
 
-## アーキテクチャ
+## Architecture
 
-### UPnP IGDの構成要素
+### UPnP IGD Components
 
-1. **SSDP**（UDP 1900）- デバイス発見プロトコル
-2. **Device Description**（HTTP GET）- XML形式のデバイス情報
-3. **SOAP Actions**（HTTP POST）- ポートマッピング等の操作
+1. **SSDP** (UDP 1900) - Device discovery protocol
+2. **Device Description** (HTTP GET) - XML device information
+3. **SOAP Actions** (HTTP POST) - Port mapping and other operations
 
-### モジュール構成
+### Module Structure
 
 ```
 src/
-├── lib.rs              # パブリックAPI
+├── lib.rs              # Public API
 ├── server/
 │   ├── mod.rs
-│   ├── ssdp.rs         # SSDP応答（M-SEARCH）
-│   └── http.rs         # HTTP/SOAPサーバー
+│   ├── ssdp.rs         # SSDP response (M-SEARCH)
+│   └── http.rs         # HTTP/SOAP server
 ├── action/
 │   ├── mod.rs
-│   ├── types.rs        # UPnP IGDアクション定義
-│   └── parser.rs       # SOAPリクエストパーサー
+│   ├── types.rs        # UPnP IGD action definitions
+│   └── parser.rs       # SOAP request parser
 ├── matcher/
 │   ├── mod.rs
-│   └── builder.rs      # リクエストマッチング条件
+│   └── builder.rs      # Request matching conditions
 ├── responder/
 │   ├── mod.rs
-│   ├── builder.rs      # レスポンス生成
-│   └── templates.rs    # XML/SOAPテンプレート
-└── mock.rs             # Mock登録・管理
+│   ├── builder.rs      # Response generation
+│   └── templates.rs    # XML/SOAP templates
+└── mock.rs             # Mock registration and management
 ```
 
-## 振る舞い定義（Matcher + Responder パターン）
+## Behavior Definition (Matcher + Responder Pattern)
 
-wiremock-rsに着想を得た設計。リクエストのマッチング条件とレスポンスを分離することで柔軟性を確保する。
+Design inspired by wiremock-rs. Flexibility is achieved by separating request matching conditions from responses.
 
-### 基本的な使い方
+### Basic Usage
 
 ```rust
 use mock_igd::{MockIgdServer, Action, Responder};
@@ -48,24 +48,24 @@ use mock_igd::{MockIgdServer, Action, Responder};
 async fn test_get_external_ip() {
     let server = MockIgdServer::start().await;
 
-    // 振る舞いを定義
+    // Define behavior
     server.mock(
         Action::GetExternalIPAddress,
         Responder::success()
             .with_external_ip("203.0.113.1")
     ).await;
 
-    // テスト対象のクライアントを実行
+    // Run the client under test
     let client = IgdClient::new(server.url());
     let ip = client.get_external_ip().await.unwrap();
     assert_eq!(ip, "203.0.113.1".parse().unwrap());
 }
 ```
 
-### 条件付きマッチング
+### Conditional Matching
 
 ```rust
-// 特定のパラメータにマッチ
+// Match specific parameters
 server.mock(
     Action::AddPortMapping
         .with_external_port(8080)
@@ -73,31 +73,31 @@ server.mock(
     Responder::success()
 ).await;
 
-// 任意のリクエストにマッチ
+// Match any request
 server.mock(
     Action::any(),
     Responder::error(501, "ActionNotImplemented")
 ).await;
 ```
 
-### エラーレスポンス
+### Error Responses
 
 ```rust
-// UPnP標準エラーコード
+// UPnP standard error codes
 server.mock(
     Action::AddPortMapping.with_external_port(80),
     Responder::error(718, "ConflictInMappingEntry")
 ).await;
 ```
 
-### カスタムレスポンス
+### Custom Responses
 
 ```rust
-// 完全にカスタムなレスポンスを返す
+// Return a fully custom response
 server.mock(
     Action::GetExternalIPAddress,
     Responder::custom(|_request| {
-        // 任意のロジック
+        // Arbitrary logic
         HttpResponse::Ok()
             .content_type("text/xml")
             .body(custom_soap_xml)
@@ -105,9 +105,9 @@ server.mock(
 ).await;
 ```
 
-## 主要な型定義
+## Core Type Definitions
 
-### Action（UPnP IGDアクション）
+### Action (UPnP IGD Actions)
 
 ```rust
 pub enum Action {
@@ -123,7 +123,7 @@ pub enum Action {
     GetTotalBytesReceived,
     GetTotalBytesSent,
 
-    // 任意のアクションにマッチ
+    // Match any action
     Any,
 }
 ```
@@ -148,24 +148,24 @@ enum ResponderKind {
 pub struct Mock {
     action: Action,
     responder: Responder,
-    priority: u32,        // 高いほど優先
-    times: Option<u32>,   // 何回マッチするか（Noneは無制限）
+    priority: u32,        // Higher = checked first
+    times: Option<u32>,   // Max match count (None = unlimited)
 }
 ```
 
-## マッチング優先順位
+## Matching Priority
 
-1. `times`が残っているMockのみが対象
-2. `priority`が高い順
-3. 同じpriorityなら登録順（後勝ち）
-4. 最初にマッチしたMockのResponderを使用
-5. どれにもマッチしなければ404または501エラー
+1. Only Mocks with remaining `times` are considered
+2. Ordered by `priority` (highest first)
+3. For equal priority, registration order (last wins)
+4. First matching Mock's Responder is used
+5. If no match, return 404 or 501 error
 
-## 将来の拡張（Phase 2以降）
+## Future Extensions (Phase 2+)
 
-### Statefulモード
+### Stateful Mode
 
-内部にポートマッピングテーブルを持ち、実際のIGDのように振る舞う。
+Maintains an internal port mapping table and behaves like a real IGD.
 
 ```rust
 let server = MockIgdServer::start()
@@ -173,31 +173,31 @@ let server = MockIgdServer::start()
     .with_external_ip("203.0.113.1")
     .await;
 
-// AddPortMappingで追加したエントリが
-// GetGenericPortMappingEntryで取得できる
+// Entries added via AddPortMapping can be retrieved
+// via GetGenericPortMappingEntry
 ```
 
-### 録画・再生モード
+### Record & Replay Mode
 
 ```rust
-// 録画
+// Record
 let server = MockIgdServer::start()
     .record_to("fixtures/session.json")
     .await;
 
-// 再生
+// Replay
 let server = MockIgdServer::from_recording("fixtures/session.json").await;
 ```
 
-### 設定ファイルからの読み込み
+### Configuration File Loading
 
 ```rust
 let server = MockIgdServer::from_config("mock-config.yaml").await;
 ```
 
-## 依存クレート（予定）
+## Dependencies
 
-- `tokio` - 非同期ランタイム
-- `hyper` または `axum` - HTTPサーバー
-- `quick-xml` - XML解析・生成
-- `socket2` - UDPソケット（SSDP用）
+- `tokio` - Async runtime
+- `axum` - HTTP server
+- `quick-xml` - XML parsing and generation
+- `socket2` - UDP socket (for SSDP)
