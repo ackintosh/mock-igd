@@ -30,7 +30,7 @@ pub mod responder;
 pub mod server;
 
 // Re-exports for convenience
-pub use action::Action;
+pub use action::{Action, Protocol};
 pub use error::{Error, Result};
 pub use matcher::Matcher;
 pub use mock::Mock;
