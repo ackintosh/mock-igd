@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 /// A registered mock that matches requests and generates responses.
-pub struct Mock {
+pub(crate) struct Mock {
     /// The action matcher.
     action: Action,
     /// The responder to use when matched.
@@ -66,11 +66,6 @@ impl Mock {
     pub fn priority(&self) -> u32 {
         self.priority
     }
-
-    /// Get the number of times this mock has been matched.
-    pub fn match_count(&self) -> u32 {
-        self.match_count.load(Ordering::SeqCst)
-    }
 }
 
 impl std::fmt::Debug for Mock {
@@ -87,7 +82,7 @@ impl std::fmt::Debug for Mock {
 
 /// Registry of mocks for matching requests.
 #[derive(Default)]
-pub struct MockRegistry {
+pub(crate) struct MockRegistry {
     mocks: RwLock<Vec<Arc<Mock>>>,
 }
 
@@ -122,17 +117,5 @@ impl MockRegistry {
     pub async fn clear(&self) {
         let mut mocks = self.mocks.write().await;
         mocks.clear();
-    }
-
-    /// Get the number of registered mocks.
-    pub async fn len(&self) -> usize {
-        let mocks = self.mocks.read().await;
-        mocks.len()
-    }
-
-    /// Check if the registry is empty.
-    pub async fn is_empty(&self) -> bool {
-        let mocks = self.mocks.read().await;
-        mocks.is_empty()
     }
 }

@@ -87,11 +87,6 @@ impl MockIgdServer {
         self.registry.register(mock).await;
     }
 
-    /// Register a mock with custom configuration.
-    pub async fn mock_with(&self, mock: Mock) {
-        self.registry.register(mock).await;
-    }
-
     /// Clear all registered mocks.
     pub async fn clear_mocks(&self) {
         self.registry.clear().await;
