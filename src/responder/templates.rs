@@ -11,7 +11,7 @@ const SOAP_ENVELOPE_END: &str = r#"</s:Body>
 </s:Envelope>"#;
 
 /// Generate a SOAP fault response.
-pub fn generate_soap_fault(code: u16, description: &str) -> String {
+pub(crate) fn generate_soap_fault(code: u16, description: &str) -> String {
     format!(
         r#"<?xml version="1.0"?>
 <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
@@ -32,7 +32,7 @@ pub fn generate_soap_fault(code: u16, description: &str) -> String {
 }
 
 /// Generate a successful SOAP response for the given action.
-pub fn generate_success_response(action_name: &str, data: &SuccessResponse) -> String {
+pub(crate) fn generate_success_response(action_name: &str, data: &SuccessResponse) -> String {
     let body = match action_name {
         "GetExternalIPAddress" => generate_get_external_ip_response(data),
         "AddPortMapping" => generate_add_port_mapping_response(),

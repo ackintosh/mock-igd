@@ -3,8 +3,9 @@
 mod builder;
 mod templates;
 
-pub use builder::*;
-pub use templates::*;
+pub use builder::SuccessResponseBuilder;
+pub(crate) use templates::generate_soap_fault;
+use templates::generate_success_response;
 
 use crate::matcher::SoapRequest;
 use std::net::IpAddr;
@@ -35,28 +36,28 @@ pub enum ResponseBody {
 
 /// Data for successful responses.
 #[derive(Debug, Clone, Default)]
-pub struct SuccessResponse {
+pub(crate) struct SuccessResponse {
     // GetExternalIPAddress
-    pub external_ip: Option<IpAddr>,
+    pub(crate) external_ip: Option<IpAddr>,
 
     // GetGenericPortMappingEntry / GetSpecificPortMappingEntry
-    pub remote_host: Option<String>,
-    pub external_port: Option<u16>,
-    pub protocol: Option<String>,
-    pub internal_port: Option<u16>,
-    pub internal_client: Option<String>,
-    pub enabled: Option<bool>,
-    pub description: Option<String>,
-    pub lease_duration: Option<u32>,
+    pub(crate) remote_host: Option<String>,
+    pub(crate) external_port: Option<u16>,
+    pub(crate) protocol: Option<String>,
+    pub(crate) internal_port: Option<u16>,
+    pub(crate) internal_client: Option<String>,
+    pub(crate) enabled: Option<bool>,
+    pub(crate) description: Option<String>,
+    pub(crate) lease_duration: Option<u32>,
 
     // GetCommonLinkProperties
-    pub wan_access_type: Option<String>,
-    pub layer1_upstream_max_bit_rate: Option<u32>,
-    pub layer1_downstream_max_bit_rate: Option<u32>,
-    pub physical_link_status: Option<String>,
+    pub(crate) wan_access_type: Option<String>,
+    pub(crate) layer1_upstream_max_bit_rate: Option<u32>,
+    pub(crate) layer1_downstream_max_bit_rate: Option<u32>,
+    pub(crate) physical_link_status: Option<String>,
 
     // GetTotalBytesReceived / GetTotalBytesSent
-    pub total_bytes: Option<u64>,
+    pub(crate) total_bytes: Option<u64>,
 }
 
 impl Responder {
