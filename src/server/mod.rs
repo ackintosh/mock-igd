@@ -65,6 +65,28 @@ impl MockIgdServer {
         self.registry.register(mock).await;
     }
 
+    /// Register a mock with a specific priority (higher = checked first).
+    pub async fn mock_with_priority(
+        &self,
+        action: impl Into<Action>,
+        responder: impl Into<Responder>,
+        priority: u32,
+    ) {
+        let mock = Mock::new(action, responder).with_priority(priority);
+        self.registry.register(mock).await;
+    }
+
+    /// Register a mock that only matches a limited number of times.
+    pub async fn mock_with_times(
+        &self,
+        action: impl Into<Action>,
+        responder: impl Into<Responder>,
+        times: u32,
+    ) {
+        let mock = Mock::new(action, responder).times(times);
+        self.registry.register(mock).await;
+    }
+
     /// Register a mock with custom configuration.
     pub async fn mock_with(&self, mock: Mock) {
         self.registry.register(mock).await;
