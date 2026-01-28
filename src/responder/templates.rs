@@ -35,6 +35,7 @@ pub(crate) fn generate_soap_fault(code: u16, description: &str) -> String {
 pub(crate) fn generate_success_response(action_name: &str, data: &SuccessResponse) -> String {
     let body = match action_name {
         "GetExternalIPAddress" => generate_get_external_ip_response(data),
+        "GetStatusInfo" => generate_get_status_info_response(data),
         "AddPortMapping" => generate_add_port_mapping_response(),
         "DeletePortMapping" => generate_delete_port_mapping_response(),
         "GetGenericPortMappingEntry" => generate_get_port_mapping_entry_response(data),
@@ -59,6 +60,19 @@ fn generate_get_external_ip_response(data: &SuccessResponse) -> String {
         r#"<u:GetExternalIPAddressResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
 <NewExternalIPAddress>{ip}</NewExternalIPAddress>
 </u:GetExternalIPAddressResponse>"#
+    )
+}
+
+fn generate_get_status_info_response(data: &SuccessResponse) -> String {
+    let connection_status = data.connection_status.as_deref().unwrap_or("Connected");
+    let last_connection_error = data.last_connection_error.as_deref().unwrap_or("ERROR_NONE");
+    let uptime = data.uptime.unwrap_or(0);
+    format!(
+        r#"<u:GetStatusInfoResponse xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+<NewConnectionStatus>{connection_status}</NewConnectionStatus>
+<NewLastConnectionError>{last_connection_error}</NewLastConnectionError>
+<NewUptime>{uptime}</NewUptime>
+</u:GetStatusInfoResponse>"#
     )
 }
 

@@ -31,6 +31,9 @@ pub enum Action {
     /// Get the external IP address of the gateway.
     GetExternalIPAddress,
 
+    /// Get the connection status information.
+    GetStatusInfo,
+
     /// Add a port mapping.
     AddPortMapping(AddPortMappingParams),
 

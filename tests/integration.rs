@@ -62,6 +62,38 @@ async fn test_get_external_ip_address() {
     assert!(body.contains("<NewExternalIPAddress>192.0.2.1</NewExternalIPAddress>"));
 }
 
+// =============================================================================
+// GetStatusInfo tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_get_status_info() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    server
+        .mock(
+            Action::GetStatusInfo,
+            Responder::success()
+                .with_connection_status("Connected")
+                .with_last_connection_error("ERROR_NONE")
+                .with_uptime(86400),
+        )
+        .await;
+
+    let (status, body) = soap_request(
+        &server.control_url(),
+        "GetStatusInfo",
+        r#"<u:GetStatusInfo xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+        </u:GetStatusInfo>"#,
+    )
+    .await;
+
+    assert_eq!(status, 200);
+    assert!(body.contains("<NewConnectionStatus>Connected</NewConnectionStatus>"));
+    assert!(body.contains("<NewLastConnectionError>ERROR_NONE</NewLastConnectionError>"));
+    assert!(body.contains("<NewUptime>86400</NewUptime>"));
+}
+
 #[tokio::test]
 async fn test_get_external_ip_address_error() {
     let server = MockIgdServer::start().await.unwrap();

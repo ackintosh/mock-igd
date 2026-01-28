@@ -17,6 +17,7 @@ pub struct SoapRequest {
 #[derive(Debug, Clone)]
 pub enum SoapRequestBody {
     GetExternalIPAddress,
+    GetStatusInfo,
     AddPortMapping(AddPortMappingRequest),
     DeletePortMapping(DeletePortMappingRequest),
     GetGenericPortMappingEntry(GetGenericPortMappingEntryRequest),
@@ -75,6 +76,10 @@ impl Matcher for Action {
 
             Action::GetExternalIPAddress => {
                 matches!(request.body, SoapRequestBody::GetExternalIPAddress)
+            }
+
+            Action::GetStatusInfo => {
+                matches!(request.body, SoapRequestBody::GetStatusInfo)
             }
 
             Action::AddPortMapping(params) => match &request.body {

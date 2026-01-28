@@ -40,6 +40,11 @@ pub(crate) struct SuccessResponse {
     // GetExternalIPAddress
     pub(crate) external_ip: Option<IpAddr>,
 
+    // GetStatusInfo
+    pub(crate) connection_status: Option<String>,
+    pub(crate) last_connection_error: Option<String>,
+    pub(crate) uptime: Option<u32>,
+
     // GetGenericPortMappingEntry / GetSpecificPortMappingEntry
     pub(crate) remote_host: Option<String>,
     pub(crate) external_port: Option<u16>,

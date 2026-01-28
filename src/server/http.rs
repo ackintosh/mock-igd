@@ -142,6 +142,7 @@ fn parse_soap_request(soap_action: &str, body: &str) -> Result<SoapRequest, Stri
 fn parse_soap_body(action_name: &str, body: &str) -> Result<SoapRequestBody, String> {
     match action_name {
         "GetExternalIPAddress" => Ok(SoapRequestBody::GetExternalIPAddress),
+        "GetStatusInfo" => Ok(SoapRequestBody::GetStatusInfo),
         "AddPortMapping" => parse_add_port_mapping(body),
         "DeletePortMapping" => parse_delete_port_mapping(body),
         "GetGenericPortMappingEntry" => parse_get_generic_port_mapping_entry(body),

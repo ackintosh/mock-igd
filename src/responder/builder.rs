@@ -17,6 +17,26 @@ impl SuccessResponseBuilder {
         self
     }
 
+    /// Set the connection status (for GetStatusInfo).
+    /// Common values: "Connected", "Disconnected", "Connecting".
+    pub fn with_connection_status(mut self, status: impl Into<String>) -> Self {
+        self.response.connection_status = Some(status.into());
+        self
+    }
+
+    /// Set the last connection error (for GetStatusInfo).
+    /// Common value: "ERROR_NONE".
+    pub fn with_last_connection_error(mut self, error: impl Into<String>) -> Self {
+        self.response.last_connection_error = Some(error.into());
+        self
+    }
+
+    /// Set the uptime in seconds (for GetStatusInfo).
+    pub fn with_uptime(mut self, uptime: u32) -> Self {
+        self.response.uptime = Some(uptime);
+        self
+    }
+
     /// Set the remote host (for port mapping responses).
     pub fn with_remote_host(mut self, host: impl Into<String>) -> Self {
         self.response.remote_host = Some(host.into());
