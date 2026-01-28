@@ -1,21 +1,27 @@
 //! SSDP (Simple Service Discovery Protocol) server implementation.
 
+use crate::mock::{MockRegistry, ReceivedSsdpRequest};
 use crate::Result;
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 /// SSDP multicast address.
 const SSDP_MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 
 /// Start the SSDP server for device discovery.
-pub async fn start_ssdp_server(http_addr: SocketAddr, port: u16) -> Result<SocketAddr> {
+pub async fn start_ssdp_server(
+    http_addr: SocketAddr,
+    port: u16,
+    registry: Arc<MockRegistry>,
+) -> Result<SocketAddr> {
     let socket = create_multicast_socket(port)?;
     let socket = UdpSocket::from_std(socket.into())?;
     let local_addr = socket.local_addr()?;
 
     tokio::spawn(async move {
-        run_ssdp_server(socket, http_addr).await;
+        run_ssdp_server(socket, http_addr, registry).await;
     });
 
     Ok(local_addr)
@@ -39,14 +45,18 @@ fn create_multicast_socket(port: u16) -> Result<Socket> {
 }
 
 /// Run the SSDP server loop.
-async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr) {
+async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr, registry: Arc<MockRegistry>) {
     let mut buf = [0u8; 2048];
 
     loop {
         match socket.recv_from(&mut buf).await {
             Ok((len, src)) => {
-                let request = String::from_utf8_lossy(&buf[..len]);
+                let request = String::from_utf8_lossy(&buf[..len]).to_string();
                 if is_msearch_request(&request) {
+                    // Record the request
+                    let received = parse_ssdp_request(&request, src, registry.start_time());
+                    registry.record_ssdp_request(received).await;
+
                     if let Err(e) = send_msearch_response(&socket, src, http_addr).await {
                         tracing::warn!("Failed to send M-SEARCH response: {}", e);
                     }
@@ -57,6 +67,43 @@ async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr) {
             }
         }
     }
+}
+
+/// Parse an SSDP M-SEARCH request into a structured format.
+fn parse_ssdp_request(
+    request: &str,
+    source: SocketAddr,
+    start_time: std::time::Instant,
+) -> ReceivedSsdpRequest {
+    let search_target = extract_header(request, "ST")
+        .unwrap_or_default();
+    let man = extract_header(request, "MAN")
+        .unwrap_or_default();
+    let mx = extract_header(request, "MX")
+        .and_then(|s| s.parse().ok());
+
+    ReceivedSsdpRequest {
+        source,
+        search_target,
+        man,
+        mx,
+        raw: request.to_string(),
+        timestamp: start_time.elapsed(),
+    }
+}
+
+/// Extract a header value from an SSDP request.
+fn extract_header(request: &str, header: &str) -> Option<String> {
+    for line in request.lines() {
+        let line = line.trim();
+        if line.to_uppercase().starts_with(&format!("{}:", header.to_uppercase())) {
+            let value = line[header.len() + 1..].trim();
+            // Remove surrounding quotes if present
+            let value = value.trim_matches('"');
+            return Some(value.to_string());
+        }
+    }
+    None
 }
 
 /// Check if the request is an M-SEARCH request for IGD.

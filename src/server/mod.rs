@@ -4,7 +4,7 @@ mod http;
 mod ssdp;
 
 use crate::action::Action;
-use crate::mock::{Mock, MockRegistry, ReceivedRequest};
+use crate::mock::{Mock, MockRegistry, ReceivedRequest, ReceivedSsdpRequest};
 use crate::responder::Responder;
 use crate::Result;
 use std::net::SocketAddr;
@@ -113,6 +113,27 @@ impl MockIgdServer {
         self.registry.clear_received_requests().await;
     }
 
+    /// Get all received SSDP requests (M-SEARCH).
+    ///
+    /// Returns a list of all SSDP M-SEARCH requests received by the server.
+    /// Useful for verifying device discovery behavior.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let requests = server.received_ssdp_requests().await;
+    /// assert_eq!(requests.len(), 1);
+    /// assert_eq!(requests[0].search_target, "ssdp:all");
+    /// ```
+    pub async fn received_ssdp_requests(&self) -> Vec<ReceivedSsdpRequest> {
+        self.registry.received_ssdp_requests().await
+    }
+
+    /// Clear all received SSDP requests.
+    pub async fn clear_received_ssdp_requests(&self) {
+        self.registry.clear_received_ssdp_requests().await;
+    }
+
     /// Shutdown the server.
     pub fn shutdown(mut self) {
         if let Some(tx) = self.shutdown_tx.take() {
@@ -175,7 +196,7 @@ impl MockIgdServerBuilder {
         // Start SSDP server if enabled
         let ssdp_addr = if self.enable_ssdp {
             let port = self.ssdp_port.unwrap_or(1900);
-            match ssdp::start_ssdp_server(http_addr, port).await {
+            match ssdp::start_ssdp_server(http_addr, port, registry.clone()).await {
                 Ok(addr) => Some(addr),
                 Err(e) => {
                     tracing::warn!("Failed to start SSDP server: {}", e);

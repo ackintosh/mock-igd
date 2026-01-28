@@ -1,6 +1,7 @@
 //! Integration tests for mock-igd server.
 
 use mock_igd::{Action, MockIgdServer, Protocol, Responder};
+use std::net::UdpSocket;
 
 /// Helper to send a SOAP request and return the response body.
 async fn soap_request(url: &str, action: &str, body: &str) -> (u16, String) {
@@ -559,4 +560,170 @@ async fn test_clear_received_requests() {
     let requests = server.received_requests().await;
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].action_name, "DeletePortMapping");
+}
+
+// =============================================================================
+// SSDP request recording tests
+// =============================================================================
+
+/// Helper to send an SSDP M-SEARCH request.
+fn send_msearch_request(target_addr: std::net::SocketAddr, search_target: &str) {
+    let socket = UdpSocket::bind("0.0.0.0:0").unwrap();
+    let request = format!(
+        "M-SEARCH * HTTP/1.1\r\n\
+         HOST: 239.255.255.250:1900\r\n\
+         MAN: \"ssdp:discover\"\r\n\
+         MX: 3\r\n\
+         ST: {}\r\n\
+         \r\n",
+        search_target
+    );
+    socket.send_to(request.as_bytes(), target_addr).unwrap();
+}
+
+#[tokio::test]
+async fn test_received_ssdp_requests() {
+    // Use a high ephemeral port to avoid conflicts with standard SSDP port
+    let server = MockIgdServer::builder()
+        .ssdp_port(0) // Use random available port
+        .start()
+        .await;
+
+    // Skip test if SSDP server couldn't start (e.g., permission issues)
+    let server = match server {
+        Ok(s) if s.ssdp_addr().is_some() => s,
+        _ => {
+            eprintln!("Skipping SSDP test - could not start SSDP server");
+            return;
+        }
+    };
+
+    let ssdp_addr = server.ssdp_addr().unwrap();
+
+    // Initially no SSDP requests
+    let requests = server.received_ssdp_requests().await;
+    assert!(requests.is_empty());
+
+    // Send an M-SEARCH request
+    send_msearch_request(ssdp_addr, "ssdp:all");
+
+    // Give the server time to receive and process the request
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    // Should have one SSDP request
+    let requests = server.received_ssdp_requests().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].search_target, "ssdp:all");
+    assert_eq!(requests[0].man, "ssdp:discover");
+    assert_eq!(requests[0].mx, Some(3));
+}
+
+#[tokio::test]
+async fn test_received_ssdp_requests_multiple() {
+    let server = MockIgdServer::builder()
+        .ssdp_port(0)
+        .start()
+        .await;
+
+    let server = match server {
+        Ok(s) if s.ssdp_addr().is_some() => s,
+        _ => {
+            eprintln!("Skipping SSDP test - could not start SSDP server");
+            return;
+        }
+    };
+
+    let ssdp_addr = server.ssdp_addr().unwrap();
+
+    // Send multiple M-SEARCH requests with different ST values
+    send_msearch_request(ssdp_addr, "ssdp:all");
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    send_msearch_request(ssdp_addr, "urn:schemas-upnp-org:device:InternetGatewayDevice:1");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let requests = server.received_ssdp_requests().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].search_target, "ssdp:all");
+    assert_eq!(
+        requests[1].search_target,
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
+    );
+}
+
+#[tokio::test]
+async fn test_clear_received_ssdp_requests() {
+    let server = MockIgdServer::builder()
+        .ssdp_port(0)
+        .start()
+        .await;
+
+    let server = match server {
+        Ok(s) if s.ssdp_addr().is_some() => s,
+        _ => {
+            eprintln!("Skipping SSDP test - could not start SSDP server");
+            return;
+        }
+    };
+
+    let ssdp_addr = server.ssdp_addr().unwrap();
+
+    // Send a request
+    send_msearch_request(ssdp_addr, "upnp:rootdevice");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    assert_eq!(server.received_ssdp_requests().await.len(), 1);
+
+    // Clear requests
+    server.clear_received_ssdp_requests().await;
+
+    assert!(server.received_ssdp_requests().await.is_empty());
+
+    // New request should be recorded
+    send_msearch_request(ssdp_addr, "urn:schemas-upnp-org:service:WANIPConnection:1");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let requests = server.received_ssdp_requests().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].search_target,
+        "urn:schemas-upnp-org:service:WANIPConnection:1"
+    );
+}
+
+#[tokio::test]
+async fn test_ssdp_request_contains_raw_data() {
+    let server = MockIgdServer::builder()
+        .ssdp_port(0)
+        .start()
+        .await;
+
+    let server = match server {
+        Ok(s) if s.ssdp_addr().is_some() => s,
+        _ => {
+            eprintln!("Skipping SSDP test - could not start SSDP server");
+            return;
+        }
+    };
+
+    let ssdp_addr = server.ssdp_addr().unwrap();
+
+    send_msearch_request(ssdp_addr, "ssdp:all");
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let requests = server.received_ssdp_requests().await;
+    assert_eq!(requests.len(), 1);
+
+    // Verify raw request contains expected content
+    let raw = &requests[0].raw;
+    assert!(raw.starts_with("M-SEARCH"));
+    assert!(raw.contains("MAN: \"ssdp:discover\""));
+    assert!(raw.contains("ST: ssdp:all"));
+    assert!(raw.contains("MX: 3"));
+
+    // Verify source address is set
+    assert!(!requests[0].source.ip().is_unspecified());
+
+    // Verify timestamp is reasonable
+    assert!(requests[0].timestamp.as_secs() < 10);
 }

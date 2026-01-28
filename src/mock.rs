@@ -3,12 +3,13 @@
 use crate::action::Action;
 use crate::matcher::{Matcher, SoapRequest};
 use crate::responder::{ResponseBody, Responder};
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
 
-/// A received request with metadata.
+/// A received SOAP request with metadata.
 #[derive(Debug, Clone)]
 pub struct ReceivedRequest {
     /// The action name (e.g., "GetExternalIPAddress", "AddPortMapping").
@@ -30,6 +31,23 @@ impl ReceivedRequest {
             timestamp: start_time.elapsed(),
         }
     }
+}
+
+/// A received SSDP request (M-SEARCH) with metadata.
+#[derive(Debug, Clone)]
+pub struct ReceivedSsdpRequest {
+    /// The source address of the request.
+    pub source: SocketAddr,
+    /// The search target (ST header value).
+    pub search_target: String,
+    /// The MAN header value (e.g., "ssdp:discover").
+    pub man: String,
+    /// The MX header value (maximum wait time in seconds).
+    pub mx: Option<u32>,
+    /// The raw request string.
+    pub raw: String,
+    /// When the request was received (relative to server start).
+    pub timestamp: std::time::Duration,
 }
 
 /// A registered mock that matches requests and generates responses.
@@ -109,6 +127,7 @@ impl std::fmt::Debug for Mock {
 pub(crate) struct MockRegistry {
     mocks: RwLock<Vec<Arc<Mock>>>,
     received_requests: RwLock<Vec<ReceivedRequest>>,
+    received_ssdp_requests: RwLock<Vec<ReceivedSsdpRequest>>,
     start_time: Instant,
 }
 
@@ -118,6 +137,7 @@ impl MockRegistry {
         MockRegistry {
             mocks: RwLock::new(Vec::new()),
             received_requests: RwLock::new(Vec::new()),
+            received_ssdp_requests: RwLock::new(Vec::new()),
             start_time: Instant::now(),
         }
     }
@@ -165,5 +185,28 @@ impl MockRegistry {
     pub async fn clear_received_requests(&self) {
         let mut requests = self.received_requests.write().await;
         requests.clear();
+    }
+
+    /// Record a received SSDP request.
+    pub async fn record_ssdp_request(&self, request: ReceivedSsdpRequest) {
+        let mut requests = self.received_ssdp_requests.write().await;
+        requests.push(request);
+    }
+
+    /// Get all received SSDP requests.
+    pub async fn received_ssdp_requests(&self) -> Vec<ReceivedSsdpRequest> {
+        let requests = self.received_ssdp_requests.read().await;
+        requests.clone()
+    }
+
+    /// Clear all received SSDP requests.
+    pub async fn clear_received_ssdp_requests(&self) {
+        let mut requests = self.received_ssdp_requests.write().await;
+        requests.clear();
+    }
+
+    /// Get the start time of the registry.
+    pub fn start_time(&self) -> Instant {
+        self.start_time
     }
 }
