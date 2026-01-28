@@ -405,3 +405,126 @@ async fn test_device_description() {
     assert!(body.contains("InternetGatewayDevice"));
     assert!(body.contains("WANIPConnection"));
 }
+
+// =============================================================================
+// Received requests tests
+// =============================================================================
+
+#[tokio::test]
+async fn test_received_requests() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    server
+        .mock(
+            Action::GetExternalIPAddress,
+            Responder::success().with_external_ip("192.0.2.1".parse().unwrap()),
+        )
+        .await;
+
+    // Initially no requests
+    let requests = server.received_requests().await;
+    assert!(requests.is_empty());
+
+    // Send a request
+    let _ = soap_request(
+        &server.control_url(),
+        "GetExternalIPAddress",
+        r#"<u:GetExternalIPAddress xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+        </u:GetExternalIPAddress>"#,
+    )
+    .await;
+
+    // Should have one request
+    let requests = server.received_requests().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].action_name, "GetExternalIPAddress");
+}
+
+#[tokio::test]
+async fn test_received_requests_multiple() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    server
+        .mock(Action::any(), Responder::success())
+        .await;
+
+    // Send multiple requests
+    let _ = soap_request(
+        &server.control_url(),
+        "GetExternalIPAddress",
+        r#"<u:GetExternalIPAddress xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+        </u:GetExternalIPAddress>"#,
+    )
+    .await;
+
+    let _ = soap_request(
+        &server.control_url(),
+        "AddPortMapping",
+        r#"<u:AddPortMapping xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+            <NewRemoteHost></NewRemoteHost>
+            <NewExternalPort>8080</NewExternalPort>
+            <NewProtocol>TCP</NewProtocol>
+            <NewInternalPort>8080</NewInternalPort>
+            <NewInternalClient>192.168.1.100</NewInternalClient>
+            <NewEnabled>1</NewEnabled>
+            <NewPortMappingDescription>Test</NewPortMappingDescription>
+            <NewLeaseDuration>0</NewLeaseDuration>
+        </u:AddPortMapping>"#,
+    )
+    .await;
+
+    let requests = server.received_requests().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].action_name, "GetExternalIPAddress");
+    assert_eq!(requests[1].action_name, "AddPortMapping");
+
+    // Verify request body details
+    if let mock_igd::matcher::SoapRequestBody::AddPortMapping(ref req) = requests[1].body {
+        assert_eq!(req.external_port, 8080);
+        assert_eq!(req.protocol, "TCP");
+        assert_eq!(req.internal_client, "192.168.1.100");
+    } else {
+        panic!("Expected AddPortMapping request body");
+    }
+}
+
+#[tokio::test]
+async fn test_clear_received_requests() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    server
+        .mock(Action::any(), Responder::success())
+        .await;
+
+    // Send a request
+    let _ = soap_request(
+        &server.control_url(),
+        "GetExternalIPAddress",
+        r#"<u:GetExternalIPAddress xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+        </u:GetExternalIPAddress>"#,
+    )
+    .await;
+
+    assert_eq!(server.received_requests().await.len(), 1);
+
+    // Clear requests
+    server.clear_received_requests().await;
+
+    assert!(server.received_requests().await.is_empty());
+
+    // New request should be recorded
+    let _ = soap_request(
+        &server.control_url(),
+        "DeletePortMapping",
+        r#"<u:DeletePortMapping xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+            <NewRemoteHost></NewRemoteHost>
+            <NewExternalPort>8080</NewExternalPort>
+            <NewProtocol>TCP</NewProtocol>
+        </u:DeletePortMapping>"#,
+    )
+    .await;
+
+    let requests = server.received_requests().await;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].action_name, "DeletePortMapping");
+}

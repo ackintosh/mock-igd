@@ -4,7 +4,7 @@ mod http;
 mod ssdp;
 
 use crate::action::Action;
-use crate::mock::{Mock, MockRegistry};
+use crate::mock::{Mock, MockRegistry, ReceivedRequest};
 use crate::responder::Responder;
 use crate::Result;
 use std::net::SocketAddr;
@@ -90,6 +90,27 @@ impl MockIgdServer {
     /// Clear all registered mocks.
     pub async fn clear_mocks(&self) {
         self.registry.clear().await;
+    }
+
+    /// Get all received requests.
+    ///
+    /// Returns a list of all SOAP requests received by the server.
+    /// Useful for verifying that expected requests were made.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let requests = server.received_requests().await;
+    /// assert_eq!(requests.len(), 1);
+    /// assert_eq!(requests[0].action_name, "GetExternalIPAddress");
+    /// ```
+    pub async fn received_requests(&self) -> Vec<ReceivedRequest> {
+        self.registry.received_requests().await
+    }
+
+    /// Clear all received requests.
+    pub async fn clear_received_requests(&self) {
+        self.registry.clear_received_requests().await;
     }
 
     /// Shutdown the server.

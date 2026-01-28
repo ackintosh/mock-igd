@@ -33,5 +33,6 @@ pub mod server;
 pub use action::{Action, Protocol};
 pub use error::{Error, Result};
 pub use matcher::Matcher;
+pub use mock::ReceivedRequest;
 pub use responder::Responder;
 pub use server::MockIgdServer;

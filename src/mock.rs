@@ -5,7 +5,32 @@ use crate::matcher::{Matcher, SoapRequest};
 use crate::responder::{ResponseBody, Responder};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::RwLock;
+
+/// A received request with metadata.
+#[derive(Debug, Clone)]
+pub struct ReceivedRequest {
+    /// The action name (e.g., "GetExternalIPAddress", "AddPortMapping").
+    pub action_name: String,
+    /// The service type from the SOAPAction header.
+    pub service_type: String,
+    /// The parsed request body.
+    pub body: crate::matcher::SoapRequestBody,
+    /// When the request was received (relative to server start).
+    pub timestamp: std::time::Duration,
+}
+
+impl ReceivedRequest {
+    pub(crate) fn from_soap_request(request: &SoapRequest, start_time: Instant) -> Self {
+        ReceivedRequest {
+            action_name: request.action_name.clone(),
+            service_type: request.service_type.clone(),
+            body: request.body.clone(),
+            timestamp: start_time.elapsed(),
+        }
+    }
+}
 
 /// A registered mock that matches requests and generates responses.
 pub(crate) struct Mock {
@@ -81,9 +106,10 @@ impl std::fmt::Debug for Mock {
 }
 
 /// Registry of mocks for matching requests.
-#[derive(Default)]
 pub(crate) struct MockRegistry {
     mocks: RwLock<Vec<Arc<Mock>>>,
+    received_requests: RwLock<Vec<ReceivedRequest>>,
+    start_time: Instant,
 }
 
 impl MockRegistry {
@@ -91,6 +117,8 @@ impl MockRegistry {
     pub fn new() -> Self {
         MockRegistry {
             mocks: RwLock::new(Vec::new()),
+            received_requests: RwLock::new(Vec::new()),
+            start_time: Instant::now(),
         }
     }
 
@@ -103,7 +131,15 @@ impl MockRegistry {
     }
 
     /// Find a mock that matches the given request and generate a response.
+    /// Also records the request.
     pub async fn find_response(&self, request: &SoapRequest) -> Option<ResponseBody> {
+        // Record the request
+        {
+            let received = ReceivedRequest::from_soap_request(request, self.start_time);
+            let mut requests = self.received_requests.write().await;
+            requests.push(received);
+        }
+
         let mocks = self.mocks.read().await;
         for mock in mocks.iter() {
             if mock.matches(request) {
@@ -113,9 +149,21 @@ impl MockRegistry {
         None
     }
 
+    /// Get all received requests.
+    pub async fn received_requests(&self) -> Vec<ReceivedRequest> {
+        let requests = self.received_requests.read().await;
+        requests.clone()
+    }
+
     /// Clear all registered mocks.
     pub async fn clear(&self) {
         let mut mocks = self.mocks.write().await;
         mocks.clear();
+    }
+
+    /// Clear all received requests.
+    pub async fn clear_received_requests(&self) {
+        let mut requests = self.received_requests.write().await;
+        requests.clear();
     }
 }
