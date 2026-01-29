@@ -439,6 +439,59 @@ async fn test_device_description() {
     assert!(body.contains("WANIPConnection"));
 }
 
+#[tokio::test]
+async fn test_wan_ip_connection_scpd() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/WANIPCn.xml", server.url()))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = response.text().await.unwrap();
+    // Verify it's a valid SCPD
+    assert!(body.contains("<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">"));
+    // Verify actions are defined
+    assert!(body.contains("<name>GetExternalIPAddress</name>"));
+    assert!(body.contains("<name>GetStatusInfo</name>"));
+    assert!(body.contains("<name>AddPortMapping</name>"));
+    assert!(body.contains("<name>DeletePortMapping</name>"));
+    assert!(body.contains("<name>GetGenericPortMappingEntry</name>"));
+    assert!(body.contains("<name>GetSpecificPortMappingEntry</name>"));
+    // Verify state variables are defined
+    assert!(body.contains("<name>ExternalIPAddress</name>"));
+    assert!(body.contains("<name>PortMappingProtocol</name>"));
+}
+
+#[tokio::test]
+async fn test_wan_common_ifc_scpd() {
+    let server = MockIgdServer::start().await.unwrap();
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/WANCommonIFC1.xml", server.url()))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+
+    let body = response.text().await.unwrap();
+    // Verify it's a valid SCPD
+    assert!(body.contains("<scpd xmlns=\"urn:schemas-upnp-org:service-1-0\">"));
+    // Verify actions are defined
+    assert!(body.contains("<name>GetCommonLinkProperties</name>"));
+    assert!(body.contains("<name>GetTotalBytesReceived</name>"));
+    assert!(body.contains("<name>GetTotalBytesSent</name>"));
+    // Verify state variables are defined
+    assert!(body.contains("<name>WANAccessType</name>"));
+    assert!(body.contains("<name>PhysicalLinkStatus</name>"));
+}
+
 // =============================================================================
 // Received requests tests
 // =============================================================================

@@ -33,6 +33,8 @@ pub async fn run_http_server(
 
     let app = Router::new()
         .route("/rootDesc.xml", get(handle_root_desc))
+        .route("/WANIPCn.xml", get(handle_wan_ip_connection_scpd))
+        .route("/WANCommonIFC1.xml", get(handle_wan_common_ifc_scpd))
         .route("/ctl/IPConn", post(handle_soap_action))
         .route("/ctl/WANCommonIFC1", post(handle_soap_action))
         .with_state(state);
@@ -48,6 +50,26 @@ pub async fn run_http_server(
 /// Handle device description request.
 async fn handle_root_desc() -> impl IntoResponse {
     let xml = generate_device_description();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
+        .body(Body::from(xml))
+        .unwrap()
+}
+
+/// Handle WANIPConnection SCPD request.
+async fn handle_wan_ip_connection_scpd() -> impl IntoResponse {
+    let xml = generate_wan_ip_connection_scpd();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
+        .body(Body::from(xml))
+        .unwrap()
+}
+
+/// Handle WANCommonInterfaceConfig SCPD request.
+async fn handle_wan_common_ifc_scpd() -> impl IntoResponse {
+    let xml = generate_wan_common_ifc_scpd();
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
@@ -269,5 +291,367 @@ fn generate_device_description() -> String {
     </deviceList>
   </device>
 </root>"#
+        .to_string()
+}
+
+/// Generate the WANIPConnection SCPD XML.
+fn generate_wan_ip_connection_scpd() -> String {
+    r#"<?xml version="1.0"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <actionList>
+    <action>
+      <name>GetExternalIPAddress</name>
+      <argumentList>
+        <argument>
+          <name>NewExternalIPAddress</name>
+          <direction>out</direction>
+          <relatedStateVariable>ExternalIPAddress</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetStatusInfo</name>
+      <argumentList>
+        <argument>
+          <name>NewConnectionStatus</name>
+          <direction>out</direction>
+          <relatedStateVariable>ConnectionStatus</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLastConnectionError</name>
+          <direction>out</direction>
+          <relatedStateVariable>LastConnectionError</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewUptime</name>
+          <direction>out</direction>
+          <relatedStateVariable>Uptime</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>AddPortMapping</name>
+      <argumentList>
+        <argument>
+          <name>NewRemoteHost</name>
+          <direction>in</direction>
+          <relatedStateVariable>RemoteHost</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewExternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>InternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalClient</name>
+          <direction>in</direction>
+          <relatedStateVariable>InternalClient</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEnabled</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingEnabled</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPortMappingDescription</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingDescription</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLeaseDuration</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingLeaseDuration</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>DeletePortMapping</name>
+      <argumentList>
+        <argument>
+          <name>NewRemoteHost</name>
+          <direction>in</direction>
+          <relatedStateVariable>RemoteHost</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewExternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetGenericPortMappingEntry</name>
+      <argumentList>
+        <argument>
+          <name>NewPortMappingIndex</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingNumberOfEntries</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewRemoteHost</name>
+          <direction>out</direction>
+          <relatedStateVariable>RemoteHost</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewExternalPort</name>
+          <direction>out</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalPort</name>
+          <direction>out</direction>
+          <relatedStateVariable>InternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalClient</name>
+          <direction>out</direction>
+          <relatedStateVariable>InternalClient</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEnabled</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingEnabled</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPortMappingDescription</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingDescription</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLeaseDuration</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingLeaseDuration</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetSpecificPortMappingEntry</name>
+      <argumentList>
+        <argument>
+          <name>NewRemoteHost</name>
+          <direction>in</direction>
+          <relatedStateVariable>RemoteHost</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewExternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalPort</name>
+          <direction>out</direction>
+          <relatedStateVariable>InternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalClient</name>
+          <direction>out</direction>
+          <relatedStateVariable>InternalClient</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEnabled</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingEnabled</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPortMappingDescription</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingDescription</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLeaseDuration</name>
+          <direction>out</direction>
+          <relatedStateVariable>PortMappingLeaseDuration</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="no">
+      <name>ExternalIPAddress</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>ConnectionStatus</name>
+      <dataType>string</dataType>
+      <allowedValueList>
+        <allowedValue>Unconfigured</allowedValue>
+        <allowedValue>Connected</allowedValue>
+        <allowedValue>Disconnected</allowedValue>
+      </allowedValueList>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>LastConnectionError</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Uptime</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>RemoteHost</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>ExternalPort</name>
+      <dataType>ui2</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>PortMappingProtocol</name>
+      <dataType>string</dataType>
+      <allowedValueList>
+        <allowedValue>TCP</allowedValue>
+        <allowedValue>UDP</allowedValue>
+      </allowedValueList>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>InternalPort</name>
+      <dataType>ui2</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>InternalClient</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>PortMappingEnabled</name>
+      <dataType>boolean</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>PortMappingDescription</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>PortMappingLeaseDuration</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>PortMappingNumberOfEntries</name>
+      <dataType>ui2</dataType>
+    </stateVariable>
+  </serviceStateTable>
+</scpd>"#
+        .to_string()
+}
+
+/// Generate the WANCommonInterfaceConfig SCPD XML.
+fn generate_wan_common_ifc_scpd() -> String {
+    r#"<?xml version="1.0"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <actionList>
+    <action>
+      <name>GetCommonLinkProperties</name>
+      <argumentList>
+        <argument>
+          <name>NewWANAccessType</name>
+          <direction>out</direction>
+          <relatedStateVariable>WANAccessType</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLayer1UpstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>Layer1UpstreamMaxBitRate</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLayer1DownstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>Layer1DownstreamMaxBitRate</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPhysicalLinkStatus</name>
+          <direction>out</direction>
+          <relatedStateVariable>PhysicalLinkStatus</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetTotalBytesReceived</name>
+      <argumentList>
+        <argument>
+          <name>NewTotalBytesReceived</name>
+          <direction>out</direction>
+          <relatedStateVariable>TotalBytesReceived</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetTotalBytesSent</name>
+      <argumentList>
+        <argument>
+          <name>NewTotalBytesSent</name>
+          <direction>out</direction>
+          <relatedStateVariable>TotalBytesSent</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+  </actionList>
+  <serviceStateTable>
+    <stateVariable sendEvents="no">
+      <name>WANAccessType</name>
+      <dataType>string</dataType>
+      <allowedValueList>
+        <allowedValue>DSL</allowedValue>
+        <allowedValue>POTS</allowedValue>
+        <allowedValue>Cable</allowedValue>
+        <allowedValue>Ethernet</allowedValue>
+      </allowedValueList>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Layer1UpstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>Layer1DownstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>PhysicalLinkStatus</name>
+      <dataType>string</dataType>
+      <allowedValueList>
+        <allowedValue>Up</allowedValue>
+        <allowedValue>Down</allowedValue>
+      </allowedValueList>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>TotalBytesReceived</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>TotalBytesSent</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+  </serviceStateTable>
+</scpd>"#
         .to_string()
 }
