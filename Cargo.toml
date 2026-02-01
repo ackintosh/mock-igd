@@ -1,0 +1,31 @@
+[package]
+name = "mock-igd"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83.0"
+license = "MIT OR Apache-2.0"
+description = "A mock UPnP Internet Gateway Device (IGD) server for testing"
+repository = "https://github.com/ackintosh/mock-igd"
+keywords = ["upnp", "igd", "mock", "testing", "nat"]
+categories = ["development-tools::testing", "network-programming"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1", features = ["net", "sync", "rt-multi-thread", "macros"] }
+
+# HTTP server
+axum = "0.7"
+
+# UDP socket for SSDP
+socket2 = { version = "0.5", features = ["all"] }
+
+# Error handling
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", features = ["rustls-tls"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
