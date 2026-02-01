@@ -12,10 +12,6 @@ pub enum Error {
     #[error("failed to bind to address: {0}")]
     Bind(#[from] std::io::Error),
 
-    /// Failed to parse XML.
-    #[error("failed to parse XML: {0}")]
-    XmlParse(#[from] quick_xml::DeError),
-
     /// Invalid SOAP action.
     #[error("invalid SOAP action: {0}")]
     InvalidAction(String),
