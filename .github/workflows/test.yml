@@ -10,7 +10,39 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  rust-version:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: read
+        name: Read rust-version from Cargo.toml
+        run: |
+          version=$(python - <<'PY'
+          import tomllib
+          with open("Cargo.toml","rb") as f:
+              data = tomllib.load(f)
+          print(data.get("package", {}).get("rust-version", ""))
+          PY
+          )
+          if [ -z "$version" ]; then
+            echo "rust-version not found in Cargo.toml" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - id: set-matrix
+        name: Build toolchain matrix
+        run: |
+          echo "matrix={\"toolchain\":[\"stable\",\"${{ steps.read.outputs.version }}\"]}" >> "$GITHUB_OUTPUT"
+
   test:
+    needs: rust-version
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.rust-version.outputs.matrix) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +50,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.toolchain }}
 
       - uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
 
