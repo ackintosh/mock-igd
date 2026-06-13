@@ -20,11 +20,22 @@ pub async fn start_ssdp_server(
     let socket = UdpSocket::from_std(socket.into())?;
     let local_addr = socket.local_addr()?;
 
+    // The socket is bound to 0.0.0.0 (UNSPECIFIED), so `local_addr` returns an
+    // unspecified IP that can't be used as a destination by clients. Replace the
+    // IP with loopback so callers can send discovery requests directly, while
+    // keeping the actual (possibly ephemeral) port.
+    let advertised_addr = match local_addr {
+        SocketAddr::V4(addr) if addr.ip().is_unspecified() => {
+            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, addr.port()))
+        }
+        other => other,
+    };
+
     tokio::spawn(async move {
         run_ssdp_server(socket, http_addr, registry).await;
     });
 
-    Ok(local_addr)
+    Ok(advertised_addr)
 }
 
 /// Create a UDP socket for SSDP multicast.

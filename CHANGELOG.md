@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-06-13
 
+### Fixed
+
+- `MockIgdServer::ssdp_addr()` now returns a loopback address (`127.0.0.1`)
+  instead of the unspecified address (`0.0.0.0`) when the SSDP socket is bound
+  to all interfaces, so the returned address can be used directly as a discovery
+  destination by clients. The actual (possibly ephemeral) port is preserved.
+
 ### Changed
 
 - Bumped minimum supported Rust version (MSRV) to 1.88.0
