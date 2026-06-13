@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to all interfaces, so the returned address can be used directly as a discovery
   destination by clients. The actual (possibly ephemeral) port is preserved.
 
+### Changed
+
+- Bumped minimum supported Rust version (MSRV) to 1.88.0
+- Migrated to Rust edition 2024
+
 ## [0.1.0] - 2025-01-25
 
 ### Added
