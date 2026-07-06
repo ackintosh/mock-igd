@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- IGD v2 (`InternetGatewayDevice:2`) support via
+  `MockIgdServer::builder().igd_version(IgdVersion::V2)`:
+  - SSDP responses advertise `InternetGatewayDevice:2` and `UPnP/1.1`
+  - Device description advertises `InternetGatewayDevice:2`, `WANDevice:2`,
+    `WANConnectionDevice:2` and `WANIPConnection:2`
+  - WANIPConnection SCPD lists the v2-only actions and state variables
+- New WANIPConnection:2 actions with matchers and responders:
+  - `AddAnyPortMapping` (`Action::add_any_port_mapping()`,
+    `Responder::success().with_reserved_port(..)`)
+  - `DeletePortMappingRange` (`Action::delete_port_mapping_range()`)
+  - `GetListOfPortMappings` (`Action::get_list_of_port_mappings()`,
+    `Responder::success().with_port_listing(..)` or a listing generated
+    from the port mapping fields)
+- `MockIgdServer::igd_version()` getter and `IgdVersion` re-export
+
+### Changed
+
+- SOAP success responses now echo the service type from the request's
+  SOAPACTION header in the response namespace (previously hardcoded to
+  `WANIPConnection:1` / `WANCommonInterfaceConfig:1`), so v2 clients
+  receive a matching namespace
+
+### Fixed
+
+- `GetSpecificPortMappingEntry` success responses now use the
+  `GetSpecificPortMappingEntryResponse` element (previously
+  `GetGenericPortMappingEntryResponse`)
+
 ## [0.2.0] - 2026-06-13
 
 ### Fixed

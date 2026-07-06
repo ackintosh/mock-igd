@@ -63,6 +63,12 @@ pub(crate) struct SuccessResponse {
 
     // GetTotalBytesReceived / GetTotalBytesSent
     pub(crate) total_bytes: Option<u64>,
+
+    // AddAnyPortMapping (IGD v2)
+    pub(crate) reserved_port: Option<u16>,
+
+    // GetListOfPortMappings (IGD v2)
+    pub(crate) port_listing: Option<String>,
 }
 
 impl Responder {
@@ -95,7 +101,8 @@ impl Responder {
     pub fn respond(&self, request: &SoapRequest) -> ResponseBody {
         match self.inner.as_ref() {
             ResponderInner::Success(data) => {
-                let xml = generate_success_response(&request.action_name, data);
+                let xml =
+                    generate_success_response(&request.action_name, &request.service_type, data);
                 ResponseBody::Soap(xml)
             }
             ResponderInner::Error { code, description } => ResponseBody::SoapFault {
@@ -110,7 +117,9 @@ impl Responder {
 impl std::fmt::Debug for Responder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.inner.as_ref() {
-            ResponderInner::Success(data) => f.debug_tuple("Responder::Success").field(data).finish(),
+            ResponderInner::Success(data) => {
+                f.debug_tuple("Responder::Success").field(data).finish()
+            }
             ResponderInner::Error { code, description } => f
                 .debug_struct("Responder::Error")
                 .field("code", code)

@@ -115,6 +115,28 @@ impl SuccessResponseBuilder {
         self
     }
 
+    /// Set the reserved port (for AddAnyPortMapping, IGD v2).
+    ///
+    /// This is the external port actually assigned by the gateway. If not
+    /// set, the value of [`with_external_port`](Self::with_external_port)
+    /// is used as a fallback.
+    pub fn with_reserved_port(mut self, port: u16) -> Self {
+        self.response.reserved_port = Some(port);
+        self
+    }
+
+    /// Set the raw port listing XML (for GetListOfPortMappings, IGD v2).
+    ///
+    /// The provided string should be a `<p:PortMappingList>` XML document.
+    /// It is XML-escaped and embedded in the `NewPortListing` argument, as
+    /// required by the WANIPConnection:2 specification. If not set, a
+    /// listing is generated from the port mapping fields
+    /// (external port, protocol, internal client, etc.) when present.
+    pub fn with_port_listing(mut self, listing: impl Into<String>) -> Self {
+        self.response.port_listing = Some(listing.into());
+        self
+    }
+
     /// Build the responder.
     pub fn build(self) -> Responder {
         Responder {

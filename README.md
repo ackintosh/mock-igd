@@ -6,6 +6,7 @@ A mock UPnP Internet Gateway Device (IGD) server for testing client implementati
 
 - SSDP discovery response (M-SEARCH)
 - SOAP action handling (GetExternalIPAddress, AddPortMapping, etc.)
+- IGD v1 (InternetGatewayDevice:1) and IGD v2 (InternetGatewayDevice:2) emulation
 - Flexible behavior definition with Matcher + Responder pattern
 - Request recording for test verification
 - Async/await support with Tokio
@@ -44,6 +45,53 @@ async fn test_port_mapping() {
     // Use server.url() to connect your IGD client
     let gateway_url = server.url();
     // ...
+}
+```
+
+## IGD v2
+
+By default the server emulates IGD v1 (`InternetGatewayDevice:1` with
+`WANIPConnection:1`). Use the builder to emulate IGD v2, which advertises
+`InternetGatewayDevice:2` / `WANIPConnection:2` in SSDP responses and the
+device description, and adds the v2-only actions `AddAnyPortMapping`,
+`DeletePortMappingRange` and `GetListOfPortMappings`:
+
+```rust
+use mock_igd::{MockIgdServer, IgdVersion, Action, Protocol, Responder};
+
+#[tokio::test]
+async fn test_igd_v2() {
+    let server = MockIgdServer::builder()
+        .igd_version(IgdVersion::V2)
+        .start()
+        .await
+        .unwrap();
+
+    // AddAnyPortMapping returns the reserved external port
+    server.mock(
+        Action::add_any_port_mapping()
+            .with_external_port(8080)
+            .with_protocol(Protocol::TCP),
+        Responder::success().with_reserved_port(8081)
+    ).await;
+
+    // DeletePortMappingRange
+    server.mock(
+        Action::delete_port_mapping_range()
+            .with_start_port(8000)
+            .with_end_port(8100),
+        Responder::success()
+    ).await;
+
+    // GetListOfPortMappings returns a port listing generated from the
+    // port mapping fields (or set a raw one with `with_port_listing`)
+    server.mock(
+        Action::get_list_of_port_mappings(),
+        Responder::success()
+            .with_external_port(8080)
+            .with_protocol("TCP")
+            .with_internal_client("192.168.1.100")
+    ).await;
 }
 ```
 

@@ -1,7 +1,8 @@
 //! SSDP (Simple Service Discovery Protocol) server implementation.
 
-use crate::mock::{MockRegistry, ReceivedSsdpRequest};
+use super::IgdVersion;
 use crate::Result;
+use crate::mock::{MockRegistry, ReceivedSsdpRequest};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
@@ -14,6 +15,7 @@ const SSDP_MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub async fn start_ssdp_server(
     http_addr: SocketAddr,
     port: u16,
+    igd_version: IgdVersion,
     registry: Arc<MockRegistry>,
 ) -> Result<SocketAddr> {
     let socket = create_multicast_socket(port)?;
@@ -32,7 +34,7 @@ pub async fn start_ssdp_server(
     };
 
     tokio::spawn(async move {
-        run_ssdp_server(socket, http_addr, registry).await;
+        run_ssdp_server(socket, http_addr, igd_version, registry).await;
     });
 
     Ok(advertised_addr)
@@ -56,7 +58,12 @@ fn create_multicast_socket(port: u16) -> Result<Socket> {
 }
 
 /// Run the SSDP server loop.
-async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr, registry: Arc<MockRegistry>) {
+async fn run_ssdp_server(
+    socket: UdpSocket,
+    http_addr: SocketAddr,
+    igd_version: IgdVersion,
+    registry: Arc<MockRegistry>,
+) {
     let mut buf = [0u8; 2048];
 
     loop {
@@ -68,7 +75,9 @@ async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr, registry: Arc
                     let received = parse_ssdp_request(&request, src, registry.start_time());
                     registry.record_ssdp_request(received).await;
 
-                    if let Err(e) = send_msearch_response(&socket, src, http_addr).await {
+                    if let Err(e) =
+                        send_msearch_response(&socket, src, http_addr, igd_version).await
+                    {
                         tracing::warn!("Failed to send M-SEARCH response: {}", e);
                     }
                 }
@@ -86,12 +95,9 @@ fn parse_ssdp_request(
     source: SocketAddr,
     start_time: std::time::Instant,
 ) -> ReceivedSsdpRequest {
-    let search_target = extract_header(request, "ST")
-        .unwrap_or_default();
-    let man = extract_header(request, "MAN")
-        .unwrap_or_default();
-    let mx = extract_header(request, "MX")
-        .and_then(|s| s.parse().ok());
+    let search_target = extract_header(request, "ST").unwrap_or_default();
+    let man = extract_header(request, "MAN").unwrap_or_default();
+    let mx = extract_header(request, "MX").and_then(|s| s.parse().ok());
 
     ReceivedSsdpRequest {
         source,
@@ -107,7 +113,10 @@ fn parse_ssdp_request(
 fn extract_header(request: &str, header: &str) -> Option<String> {
     for line in request.lines() {
         let line = line.trim();
-        if line.to_uppercase().starts_with(&format!("{}:", header.to_uppercase())) {
+        if line
+            .to_uppercase()
+            .starts_with(&format!("{}:", header.to_uppercase()))
+        {
             let value = line[header.len() + 1..].trim();
             // Remove surrounding quotes if present
             let value = value.trim_matches('"');
@@ -131,17 +140,22 @@ async fn send_msearch_response(
     socket: &UdpSocket,
     dest: SocketAddr,
     http_addr: SocketAddr,
+    igd_version: IgdVersion,
 ) -> Result<()> {
+    let version = igd_version.number();
+    let upnp_version = match igd_version {
+        IgdVersion::V1 => "UPnP/1.0",
+        IgdVersion::V2 => "UPnP/1.1",
+    };
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
          CACHE-CONTROL: max-age=1800\r\n\
-         ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
-         USN: uuid:mock-igd-001::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
+         ST: urn:schemas-upnp-org:device:InternetGatewayDevice:{version}\r\n\
+         USN: uuid:mock-igd-001::urn:schemas-upnp-org:device:InternetGatewayDevice:{version}\r\n\
          EXT:\r\n\
-         SERVER: mock-igd/0.1 UPnP/1.0\r\n\
-         LOCATION: http://{}/rootDesc.xml\r\n\
-         \r\n",
-        http_addr
+         SERVER: mock-igd/0.1 {upnp_version}\r\n\
+         LOCATION: http://{http_addr}/rootDesc.xml\r\n\
+         \r\n"
     );
 
     socket.send_to(response.as_bytes(), dest).await?;
