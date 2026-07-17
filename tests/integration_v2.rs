@@ -371,39 +371,58 @@ async fn test_v2_requests_are_recorded() {
 // SSDP tests
 // =============================================================================
 
-#[tokio::test]
-async fn test_v2_ssdp_response_advertises_igd_v2() {
+/// Helper to start a server with SSDP enabled on a random port.
+/// Returns None if the SSDP server could not start (e.g. permission issues).
+async fn start_ssdp_server(igd_version: IgdVersion) -> Option<MockIgdServer> {
     let server = MockIgdServer::builder()
-        .igd_version(IgdVersion::V2)
+        .igd_version(igd_version)
         .ssdp_port(0)
         .start()
         .await;
-
-    let server = match server {
-        Ok(s) if s.ssdp_addr().is_some() => s,
+    match server {
+        Ok(s) if s.ssdp_addr().is_some() => Some(s),
         _ => {
             eprintln!("Skipping SSDP test - could not start SSDP server");
-            return;
+            None
         }
-    };
+    }
+}
 
+/// Helper to send an M-SEARCH with the given ST and wait for a response.
+/// Returns None if no response arrives within the timeout.
+async fn ssdp_search(server: &MockIgdServer, st: &str) -> Option<String> {
     let ssdp_addr = server.ssdp_addr().unwrap();
 
     let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
-    let request = "M-SEARCH * HTTP/1.1\r\n\
+    let request = format!(
+        "M-SEARCH * HTTP/1.1\r\n\
          HOST: 239.255.255.250:1900\r\n\
          MAN: \"ssdp:discover\"\r\n\
          MX: 3\r\n\
-         ST: urn:schemas-upnp-org:device:InternetGatewayDevice:2\r\n\
-         \r\n";
+         ST: {st}\r\n\
+         \r\n"
+    );
     socket.send_to(request.as_bytes(), ssdp_addr).await.unwrap();
 
     let mut buf = [0u8; 2048];
-    let (len, _) = tokio::time::timeout(Duration::from_secs(3), socket.recv_from(&mut buf))
-        .await
-        .expect("timed out waiting for M-SEARCH response")
-        .unwrap();
-    let response = String::from_utf8_lossy(&buf[..len]);
+    match tokio::time::timeout(Duration::from_millis(1500), socket.recv_from(&mut buf)).await {
+        Ok(Ok((len, _))) => Some(String::from_utf8_lossy(&buf[..len]).to_string()),
+        _ => None,
+    }
+}
+
+#[tokio::test]
+async fn test_v2_ssdp_response_advertises_igd_v2() {
+    let Some(server) = start_ssdp_server(IgdVersion::V2).await else {
+        return;
+    };
+
+    let response = ssdp_search(
+        &server,
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
+    )
+    .await
+    .expect("timed out waiting for M-SEARCH response");
 
     assert!(response.starts_with("HTTP/1.1 200 OK"));
     assert!(response.contains("ST: urn:schemas-upnp-org:device:InternetGatewayDevice:2"));
@@ -413,4 +432,109 @@ async fn test_v2_ssdp_response_advertises_igd_v2() {
         )
     );
     assert!(response.contains("UPnP/1.1"));
+}
+
+#[tokio::test]
+async fn test_v2_ssdp_echoes_v1_device_search() {
+    // An IGD v2 device is backward compatible: a search for
+    // InternetGatewayDevice:1 is answered with a version 1 ST.
+    let Some(server) = start_ssdp_server(IgdVersion::V2).await else {
+        return;
+    };
+
+    let response = ssdp_search(
+        &server,
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+    )
+    .await
+    .expect("timed out waiting for M-SEARCH response");
+
+    assert!(response.contains("ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1"));
+    assert!(
+        response.contains(
+            "USN: uuid:mock-igd-001::urn:schemas-upnp-org:device:InternetGatewayDevice:1"
+        )
+    );
+}
+
+#[tokio::test]
+async fn test_v2_ssdp_echoes_v1_service_search() {
+    let Some(server) = start_ssdp_server(IgdVersion::V2).await else {
+        return;
+    };
+
+    let response = ssdp_search(&server, "urn:schemas-upnp-org:service:WANIPConnection:1")
+        .await
+        .expect("timed out waiting for M-SEARCH response");
+
+    assert!(response.contains("ST: urn:schemas-upnp-org:service:WANIPConnection:1"));
+}
+
+#[tokio::test]
+async fn test_v1_ssdp_ignores_v2_search() {
+    // A v1 device does not support version 2, so a search for
+    // InternetGatewayDevice:2 must not be answered.
+    let Some(server) = start_ssdp_server(IgdVersion::V1).await else {
+        return;
+    };
+
+    let response = ssdp_search(
+        &server,
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:2",
+    )
+    .await;
+    assert!(response.is_none());
+
+    // The same server still answers a version 1 search.
+    let response = ssdp_search(
+        &server,
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+    )
+    .await
+    .expect("timed out waiting for M-SEARCH response");
+    assert!(response.contains("ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1"));
+}
+
+// =============================================================================
+// v1 client against a v2 server (backward compatibility)
+// =============================================================================
+
+#[tokio::test]
+async fn test_v2_server_accepts_v1_soap_request() {
+    // A v1-only client sends WANIPConnection:1 SOAP requests to the same
+    // control URL; the response namespace echoes the v1 service type.
+    let server = start_v2_server().await;
+
+    server
+        .mock(
+            Action::GetExternalIPAddress,
+            Responder::success().with_external_ip("192.0.2.1".parse().unwrap()),
+        )
+        .await;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(server.control_url())
+        .header("Content-Type", "text/xml; charset=\"utf-8\"")
+        .header(
+            "SOAPAction",
+            "\"urn:schemas-upnp-org:service:WANIPConnection:1#GetExternalIPAddress\"",
+        )
+        .body(
+            r#"<?xml version="1.0"?>
+<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/">
+<s:Body>
+<u:GetExternalIPAddress xmlns:u="urn:schemas-upnp-org:service:WANIPConnection:1">
+</u:GetExternalIPAddress>
+</s:Body>
+</s:Envelope>"#,
+        )
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().await.unwrap();
+    assert!(body.contains("<NewExternalIPAddress>192.0.2.1</NewExternalIPAddress>"));
+    assert!(body.contains("urn:schemas-upnp-org:service:WANIPConnection:1"));
 }

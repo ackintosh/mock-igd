@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `Responder::success().with_port_listing(..)` or a listing generated
     from the port mapping fields)
 - `MockIgdServer::igd_version()` getter and `IgdVersion` re-export
+- IGD v2 servers are backward compatible with v1 clients, like real
+  dual-version routers: SSDP M-SEARCH responses echo the searched ST
+  (a search for `InternetGatewayDevice:1` / `WANIPConnection:1` is
+  answered with the v1 ST), and SOAP requests with the
+  `WANIPConnection:1` service type are accepted. A v1 server no longer
+  answers SSDP searches for version 2 targets it does not support
 
 ### Changed
 

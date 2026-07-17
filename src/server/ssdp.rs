@@ -73,12 +73,16 @@ async fn run_ssdp_server(
                 if is_msearch_request(&request) {
                     // Record the request
                     let received = parse_ssdp_request(&request, src, registry.start_time());
+                    let st = response_search_target(&received.search_target, igd_version);
                     registry.record_ssdp_request(received).await;
 
-                    if let Err(e) =
-                        send_msearch_response(&socket, src, http_addr, igd_version).await
-                    {
-                        tracing::warn!("Failed to send M-SEARCH response: {}", e);
+                    // Only respond when the searched version is one we emulate.
+                    if let Some(st) = st {
+                        if let Err(e) =
+                            send_msearch_response(&socket, src, http_addr, igd_version, &st).await
+                        {
+                            tracing::warn!("Failed to send M-SEARCH response: {}", e);
+                        }
                     }
                 }
             }
@@ -135,14 +139,42 @@ fn is_msearch_request(request: &str) -> bool {
             || request.contains("urn:schemas-upnp-org:service:WANIPConnection"))
 }
 
+/// Determine the ST value for an M-SEARCH response.
+///
+/// Like real IGD devices, the response echoes the search target when it
+/// names a device/service version this server supports: an IGD v2 device
+/// is backward compatible and answers searches for version 1 with a
+/// version 1 ST. Returns `None` when the searched version is higher than
+/// the emulated one, in which case no response must be sent.
+fn response_search_target(search_target: &str, igd_version: IgdVersion) -> Option<String> {
+    const VERSIONED_PREFIXES: [&str; 2] = [
+        "urn:schemas-upnp-org:device:InternetGatewayDevice",
+        "urn:schemas-upnp-org:service:WANIPConnection",
+    ];
+    for prefix in VERSIONED_PREFIXES {
+        if let Some(rest) = search_target.strip_prefix(prefix) {
+            let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
+            if requested <= igd_version.number() {
+                return Some(search_target.to_string());
+            }
+            return None;
+        }
+    }
+    // ssdp:all, upnp:rootdevice, etc.: advertise the device's own version.
+    Some(format!(
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:{}",
+        igd_version.number()
+    ))
+}
+
 /// Send M-SEARCH response.
 async fn send_msearch_response(
     socket: &UdpSocket,
     dest: SocketAddr,
     http_addr: SocketAddr,
     igd_version: IgdVersion,
+    st: &str,
 ) -> Result<()> {
-    let version = igd_version.number();
     let upnp_version = match igd_version {
         IgdVersion::V1 => "UPnP/1.0",
         IgdVersion::V2 => "UPnP/1.1",
@@ -150,8 +182,8 @@ async fn send_msearch_response(
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
          CACHE-CONTROL: max-age=1800\r\n\
-         ST: urn:schemas-upnp-org:device:InternetGatewayDevice:{version}\r\n\
-         USN: uuid:mock-igd-001::urn:schemas-upnp-org:device:InternetGatewayDevice:{version}\r\n\
+         ST: {st}\r\n\
+         USN: uuid:mock-igd-001::{st}\r\n\
          EXT:\r\n\
          SERVER: mock-igd/0.1 {upnp_version}\r\n\
          LOCATION: http://{http_addr}/rootDesc.xml\r\n\

@@ -54,7 +54,14 @@ By default the server emulates IGD v1 (`InternetGatewayDevice:1` with
 `WANIPConnection:1`). Use the builder to emulate IGD v2, which advertises
 `InternetGatewayDevice:2` / `WANIPConnection:2` in SSDP responses and the
 device description, and adds the v2-only actions `AddAnyPortMapping`,
-`DeletePortMappingRange` and `GetListOfPortMappings`:
+`DeletePortMappingRange` and `GetListOfPortMappings`.
+
+Like a real IGD v2 router, the v2 server stays backward compatible with
+v1 clients: SSDP searches for `InternetGatewayDevice:1` /
+`WANIPConnection:1` are answered with the searched (v1) ST, and SOAP
+requests using the `WANIPConnection:1` service type are accepted, with
+the response namespace echoing the request. Conversely, a v1 server does
+not answer searches for version 2.
 
 ```rust
 use mock_igd::{MockIgdServer, IgdVersion, Action, Protocol, Responder};
