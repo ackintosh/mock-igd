@@ -35,4 +35,4 @@ pub use error::{Error, Result};
 pub use matcher::Matcher;
 pub use mock::{ReceivedRequest, ReceivedSsdpRequest};
 pub use responder::Responder;
-pub use server::MockIgdServer;
+pub use server::{IgdVersion, MockIgdServer};

@@ -1,7 +1,8 @@
 //! SSDP (Simple Service Discovery Protocol) server implementation.
 
-use crate::mock::{MockRegistry, ReceivedSsdpRequest};
+use super::IgdVersion;
 use crate::Result;
+use crate::mock::{MockRegistry, ReceivedSsdpRequest};
 use socket2::{Domain, Protocol, Socket, Type};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
@@ -14,6 +15,7 @@ const SSDP_MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub async fn start_ssdp_server(
     http_addr: SocketAddr,
     port: u16,
+    igd_version: IgdVersion,
     registry: Arc<MockRegistry>,
 ) -> Result<SocketAddr> {
     let socket = create_multicast_socket(port)?;
@@ -32,7 +34,7 @@ pub async fn start_ssdp_server(
     };
 
     tokio::spawn(async move {
-        run_ssdp_server(socket, http_addr, registry).await;
+        run_ssdp_server(socket, http_addr, igd_version, registry).await;
     });
 
     Ok(advertised_addr)
@@ -56,7 +58,12 @@ fn create_multicast_socket(port: u16) -> Result<Socket> {
 }
 
 /// Run the SSDP server loop.
-async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr, registry: Arc<MockRegistry>) {
+async fn run_ssdp_server(
+    socket: UdpSocket,
+    http_addr: SocketAddr,
+    igd_version: IgdVersion,
+    registry: Arc<MockRegistry>,
+) {
     let mut buf = [0u8; 2048];
 
     loop {
@@ -66,10 +73,16 @@ async fn run_ssdp_server(socket: UdpSocket, http_addr: SocketAddr, registry: Arc
                 if is_msearch_request(&request) {
                     // Record the request
                     let received = parse_ssdp_request(&request, src, registry.start_time());
+                    let st = response_search_target(&received.search_target, igd_version);
                     registry.record_ssdp_request(received).await;
 
-                    if let Err(e) = send_msearch_response(&socket, src, http_addr).await {
-                        tracing::warn!("Failed to send M-SEARCH response: {}", e);
+                    // Only respond when the searched version is one we emulate.
+                    if let Some(st) = st {
+                        if let Err(e) =
+                            send_msearch_response(&socket, src, http_addr, igd_version, &st).await
+                        {
+                            tracing::warn!("Failed to send M-SEARCH response: {}", e);
+                        }
                     }
                 }
             }
@@ -86,12 +99,9 @@ fn parse_ssdp_request(
     source: SocketAddr,
     start_time: std::time::Instant,
 ) -> ReceivedSsdpRequest {
-    let search_target = extract_header(request, "ST")
-        .unwrap_or_default();
-    let man = extract_header(request, "MAN")
-        .unwrap_or_default();
-    let mx = extract_header(request, "MX")
-        .and_then(|s| s.parse().ok());
+    let search_target = extract_header(request, "ST").unwrap_or_default();
+    let man = extract_header(request, "MAN").unwrap_or_default();
+    let mx = extract_header(request, "MX").and_then(|s| s.parse().ok());
 
     ReceivedSsdpRequest {
         source,
@@ -107,7 +117,10 @@ fn parse_ssdp_request(
 fn extract_header(request: &str, header: &str) -> Option<String> {
     for line in request.lines() {
         let line = line.trim();
-        if line.to_uppercase().starts_with(&format!("{}:", header.to_uppercase())) {
+        if line
+            .to_uppercase()
+            .starts_with(&format!("{}:", header.to_uppercase()))
+        {
             let value = line[header.len() + 1..].trim();
             // Remove surrounding quotes if present
             let value = value.trim_matches('"');
@@ -126,22 +139,55 @@ fn is_msearch_request(request: &str) -> bool {
             || request.contains("urn:schemas-upnp-org:service:WANIPConnection"))
 }
 
+/// Determine the ST value for an M-SEARCH response.
+///
+/// Like real IGD devices, the response echoes the search target when it
+/// names a device/service version this server supports: an IGD v2 device
+/// is backward compatible and answers searches for version 1 with a
+/// version 1 ST. Returns `None` when the searched version is higher than
+/// the emulated one, in which case no response must be sent.
+fn response_search_target(search_target: &str, igd_version: IgdVersion) -> Option<String> {
+    const VERSIONED_PREFIXES: [&str; 2] = [
+        "urn:schemas-upnp-org:device:InternetGatewayDevice",
+        "urn:schemas-upnp-org:service:WANIPConnection",
+    ];
+    for prefix in VERSIONED_PREFIXES {
+        if let Some(rest) = search_target.strip_prefix(prefix) {
+            let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
+            if requested <= igd_version.number() {
+                return Some(search_target.to_string());
+            }
+            return None;
+        }
+    }
+    // ssdp:all, upnp:rootdevice, etc.: advertise the device's own version.
+    Some(format!(
+        "urn:schemas-upnp-org:device:InternetGatewayDevice:{}",
+        igd_version.number()
+    ))
+}
+
 /// Send M-SEARCH response.
 async fn send_msearch_response(
     socket: &UdpSocket,
     dest: SocketAddr,
     http_addr: SocketAddr,
+    igd_version: IgdVersion,
+    st: &str,
 ) -> Result<()> {
+    let upnp_version = match igd_version {
+        IgdVersion::V1 => "UPnP/1.0",
+        IgdVersion::V2 => "UPnP/1.1",
+    };
     let response = format!(
         "HTTP/1.1 200 OK\r\n\
          CACHE-CONTROL: max-age=1800\r\n\
-         ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
-         USN: uuid:mock-igd-001::urn:schemas-upnp-org:device:InternetGatewayDevice:1\r\n\
+         ST: {st}\r\n\
+         USN: uuid:mock-igd-001::{st}\r\n\
          EXT:\r\n\
-         SERVER: mock-igd/0.1 UPnP/1.0\r\n\
-         LOCATION: http://{}/rootDesc.xml\r\n\
-         \r\n",
-        http_addr
+         SERVER: mock-igd/0.1 {upnp_version}\r\n\
+         LOCATION: http://{http_addr}/rootDesc.xml\r\n\
+         \r\n"
     );
 
     socket.send_to(response.as_bytes(), dest).await?;

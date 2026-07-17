@@ -3,13 +3,40 @@
 mod http;
 mod ssdp;
 
+use crate::Result;
 use crate::action::Action;
 use crate::mock::{Mock, MockRegistry, ReceivedRequest, ReceivedSsdpRequest};
 use crate::responder::Responder;
-use crate::Result;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+
+/// UPnP IGD specification version the mock server emulates.
+///
+/// The version determines the device/service types advertised in SSDP
+/// responses and the device description, as well as the actions listed in
+/// the WANIPConnection SCPD.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum IgdVersion {
+    /// InternetGatewayDevice:1 with WANIPConnection:1 (default).
+    #[default]
+    V1,
+    /// InternetGatewayDevice:2 with WANIPConnection:2.
+    ///
+    /// Adds the v2-only actions `AddAnyPortMapping`,
+    /// `DeletePortMappingRange` and `GetListOfPortMappings`.
+    V2,
+}
+
+impl IgdVersion {
+    /// The numeric device/service version suffix (1 or 2).
+    pub fn number(&self) -> u8 {
+        match self {
+            IgdVersion::V1 => 1,
+            IgdVersion::V2 => 2,
+        }
+    }
+}
 
 /// A mock UPnP IGD server for testing.
 pub struct MockIgdServer {
@@ -17,6 +44,8 @@ pub struct MockIgdServer {
     http_addr: SocketAddr,
     /// SSDP server address (if enabled).
     ssdp_addr: Option<SocketAddr>,
+    /// IGD version the server emulates.
+    igd_version: IgdVersion,
     /// Mock registry.
     registry: Arc<MockRegistry>,
     /// Shutdown signal sender.
@@ -57,6 +86,11 @@ impl MockIgdServer {
     /// Get the SSDP server address (if enabled).
     pub fn ssdp_addr(&self) -> Option<SocketAddr> {
         self.ssdp_addr
+    }
+
+    /// Get the IGD version the server emulates.
+    pub fn igd_version(&self) -> IgdVersion {
+        self.igd_version
     }
 
     /// Register a mock for the given action.
@@ -156,12 +190,19 @@ pub struct MockIgdServerBuilder {
     http_port: Option<u16>,
     enable_ssdp: bool,
     ssdp_port: Option<u16>,
+    igd_version: IgdVersion,
 }
 
 impl MockIgdServerBuilder {
     /// Set a specific port for the HTTP server.
     pub fn http_port(mut self, port: u16) -> Self {
         self.http_port = Some(port);
+        self
+    }
+
+    /// Set the IGD version to emulate (default: [`IgdVersion::V1`]).
+    pub fn igd_version(mut self, version: IgdVersion) -> Self {
+        self.igd_version = version;
         self
     }
 
@@ -188,15 +229,16 @@ impl MockIgdServerBuilder {
         let listener = tokio::net::TcpListener::bind(&http_addr).await?;
         let http_addr = listener.local_addr()?;
 
+        let igd_version = self.igd_version;
         let http_registry = registry.clone();
         tokio::spawn(async move {
-            http::run_http_server(listener, http_registry, shutdown_rx).await;
+            http::run_http_server(listener, http_registry, igd_version, shutdown_rx).await;
         });
 
         // Start SSDP server if enabled
         let ssdp_addr = if self.enable_ssdp {
             let port = self.ssdp_port.unwrap_or(1900);
-            match ssdp::start_ssdp_server(http_addr, port, registry.clone()).await {
+            match ssdp::start_ssdp_server(http_addr, port, igd_version, registry.clone()).await {
                 Ok(addr) => Some(addr),
                 Err(e) => {
                     tracing::warn!("Failed to start SSDP server: {}", e);
@@ -210,6 +252,7 @@ impl MockIgdServerBuilder {
         Ok(MockIgdServer {
             http_addr,
             ssdp_addr,
+            igd_version,
             registry,
             shutdown_tx: Some(shutdown_tx),
         })

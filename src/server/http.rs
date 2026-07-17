@@ -1,18 +1,20 @@
 //! HTTP/SOAP server implementation.
 
+use super::IgdVersion;
 use crate::matcher::{
-    AddPortMappingRequest, DeletePortMappingRequest, GetGenericPortMappingEntryRequest,
+    AddPortMappingRequest, DeletePortMappingRangeRequest, DeletePortMappingRequest,
+    GetGenericPortMappingEntryRequest, GetListOfPortMappingsRequest,
     GetSpecificPortMappingEntryRequest, SoapRequest, SoapRequestBody,
 };
 use crate::mock::MockRegistry;
-use crate::responder::{generate_soap_fault, ResponseBody};
+use crate::responder::{ResponseBody, generate_soap_fault};
 use axum::{
+    Router,
     body::Body,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Router,
 };
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -21,15 +23,20 @@ use tokio::sync::oneshot;
 /// Shared state for the HTTP server.
 struct AppState {
     registry: Arc<MockRegistry>,
+    igd_version: IgdVersion,
 }
 
 /// Run the HTTP server.
 pub async fn run_http_server(
     listener: TcpListener,
     registry: Arc<MockRegistry>,
+    igd_version: IgdVersion,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let state = Arc::new(AppState { registry });
+    let state = Arc::new(AppState {
+        registry,
+        igd_version,
+    });
 
     let app = Router::new()
         .route("/rootDesc.xml", get(handle_root_desc))
@@ -48,8 +55,8 @@ pub async fn run_http_server(
 }
 
 /// Handle device description request.
-async fn handle_root_desc() -> impl IntoResponse {
-    let xml = generate_device_description();
+async fn handle_root_desc(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let xml = generate_device_description(state.igd_version);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
@@ -58,8 +65,8 @@ async fn handle_root_desc() -> impl IntoResponse {
 }
 
 /// Handle WANIPConnection SCPD request.
-async fn handle_wan_ip_connection_scpd() -> impl IntoResponse {
-    let xml = generate_wan_ip_connection_scpd();
+async fn handle_wan_ip_connection_scpd(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let xml = generate_wan_ip_connection_scpd(state.igd_version);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
@@ -169,6 +176,9 @@ fn parse_soap_body(action_name: &str, body: &str) -> Result<SoapRequestBody, Str
         "DeletePortMapping" => parse_delete_port_mapping(body),
         "GetGenericPortMappingEntry" => parse_get_generic_port_mapping_entry(body),
         "GetSpecificPortMappingEntry" => parse_get_specific_port_mapping_entry(body),
+        "AddAnyPortMapping" => parse_add_any_port_mapping(body),
+        "DeletePortMappingRange" => parse_delete_port_mapping_range(body),
+        "GetListOfPortMappings" => parse_get_list_of_port_mappings(body),
         "GetCommonLinkProperties" => Ok(SoapRequestBody::GetCommonLinkProperties),
         "GetTotalBytesReceived" => Ok(SoapRequestBody::GetTotalBytesReceived),
         "GetTotalBytesSent" => Ok(SoapRequestBody::GetTotalBytesSent),
@@ -190,8 +200,8 @@ fn extract_xml_value(body: &str, tag: &str) -> Option<String> {
     Some(body[content_start..content_start + end].to_string())
 }
 
-fn parse_add_port_mapping(body: &str) -> Result<SoapRequestBody, String> {
-    Ok(SoapRequestBody::AddPortMapping(AddPortMappingRequest {
+fn parse_port_mapping_fields(body: &str) -> AddPortMappingRequest {
+    AddPortMappingRequest {
         remote_host: extract_xml_value(body, "NewRemoteHost").unwrap_or_default(),
         external_port: extract_xml_value(body, "NewExternalPort")
             .and_then(|s| s.parse().ok())
@@ -208,17 +218,68 @@ fn parse_add_port_mapping(body: &str) -> Result<SoapRequestBody, String> {
         lease_duration: extract_xml_value(body, "NewLeaseDuration")
             .and_then(|s| s.parse().ok())
             .unwrap_or(0),
-    }))
+    }
+}
+
+fn parse_add_port_mapping(body: &str) -> Result<SoapRequestBody, String> {
+    Ok(SoapRequestBody::AddPortMapping(parse_port_mapping_fields(
+        body,
+    )))
+}
+
+fn parse_add_any_port_mapping(body: &str) -> Result<SoapRequestBody, String> {
+    Ok(SoapRequestBody::AddAnyPortMapping(
+        parse_port_mapping_fields(body),
+    ))
+}
+
+fn parse_delete_port_mapping_range(body: &str) -> Result<SoapRequestBody, String> {
+    Ok(SoapRequestBody::DeletePortMappingRange(
+        DeletePortMappingRangeRequest {
+            start_port: extract_xml_value(body, "NewStartPort")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            end_port: extract_xml_value(body, "NewEndPort")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            protocol: extract_xml_value(body, "NewProtocol").unwrap_or_else(|| "TCP".to_string()),
+            manage: extract_xml_value(body, "NewManage")
+                .map(|s| s == "1" || s.to_lowercase() == "true")
+                .unwrap_or(false),
+        },
+    ))
+}
+
+fn parse_get_list_of_port_mappings(body: &str) -> Result<SoapRequestBody, String> {
+    Ok(SoapRequestBody::GetListOfPortMappings(
+        GetListOfPortMappingsRequest {
+            start_port: extract_xml_value(body, "NewStartPort")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            end_port: extract_xml_value(body, "NewEndPort")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            protocol: extract_xml_value(body, "NewProtocol").unwrap_or_else(|| "TCP".to_string()),
+            manage: extract_xml_value(body, "NewManage")
+                .map(|s| s == "1" || s.to_lowercase() == "true")
+                .unwrap_or(false),
+            number_of_ports: extract_xml_value(body, "NewNumberOfPorts")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+        },
+    ))
 }
 
 fn parse_delete_port_mapping(body: &str) -> Result<SoapRequestBody, String> {
-    Ok(SoapRequestBody::DeletePortMapping(DeletePortMappingRequest {
-        remote_host: extract_xml_value(body, "NewRemoteHost").unwrap_or_default(),
-        external_port: extract_xml_value(body, "NewExternalPort")
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(0),
-        protocol: extract_xml_value(body, "NewProtocol").unwrap_or_else(|| "TCP".to_string()),
-    }))
+    Ok(SoapRequestBody::DeletePortMapping(
+        DeletePortMappingRequest {
+            remote_host: extract_xml_value(body, "NewRemoteHost").unwrap_or_default(),
+            external_port: extract_xml_value(body, "NewExternalPort")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0),
+            protocol: extract_xml_value(body, "NewProtocol").unwrap_or_else(|| "TCP".to_string()),
+        },
+    ))
 }
 
 fn parse_get_generic_port_mapping_entry(body: &str) -> Result<SoapRequestBody, String> {
@@ -244,32 +305,39 @@ fn parse_get_specific_port_mapping_entry(body: &str) -> Result<SoapRequestBody, 
 }
 
 /// Generate the UPnP device description XML.
-fn generate_device_description() -> String {
-    r#"<?xml version="1.0"?>
+fn generate_device_description(igd_version: IgdVersion) -> String {
+    let version = igd_version.number();
+    // IGD v2 is based on UPnP Device Architecture 1.1.
+    let spec_minor = match igd_version {
+        IgdVersion::V1 => 0,
+        IgdVersion::V2 => 1,
+    };
+    format!(
+        r#"<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
   <specVersion>
     <major>1</major>
-    <minor>0</minor>
+    <minor>{spec_minor}</minor>
   </specVersion>
   <device>
-    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:1</deviceType>
+    <deviceType>urn:schemas-upnp-org:device:InternetGatewayDevice:{version}</deviceType>
     <friendlyName>Mock IGD</friendlyName>
     <manufacturer>mock-igd</manufacturer>
     <modelName>Mock Internet Gateway Device</modelName>
     <UDN>uuid:mock-igd-001</UDN>
     <deviceList>
       <device>
-        <deviceType>urn:schemas-upnp-org:device:WANDevice:1</deviceType>
+        <deviceType>urn:schemas-upnp-org:device:WANDevice:{version}</deviceType>
         <friendlyName>WANDevice</friendlyName>
         <UDN>uuid:mock-igd-wan-001</UDN>
         <deviceList>
           <device>
-            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:1</deviceType>
+            <deviceType>urn:schemas-upnp-org:device:WANConnectionDevice:{version}</deviceType>
             <friendlyName>WANConnectionDevice</friendlyName>
             <UDN>uuid:mock-igd-wanconn-001</UDN>
             <serviceList>
               <service>
-                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:1</serviceType>
+                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:{version}</serviceType>
                 <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
                 <SCPDURL>/WANIPCn.xml</SCPDURL>
                 <controlURL>/ctl/IPConn</controlURL>
@@ -291,16 +359,153 @@ fn generate_device_description() -> String {
     </deviceList>
   </device>
 </root>"#
-        .to_string()
+    )
 }
 
+/// Actions added by WANIPConnection:2 (IGD v2).
+const WAN_IP_CONNECTION_V2_ACTIONS: &str = r#"    <action>
+      <name>AddAnyPortMapping</name>
+      <argumentList>
+        <argument>
+          <name>NewRemoteHost</name>
+          <direction>in</direction>
+          <relatedStateVariable>RemoteHost</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewExternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>InternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewInternalClient</name>
+          <direction>in</direction>
+          <relatedStateVariable>InternalClient</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEnabled</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingEnabled</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPortMappingDescription</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingDescription</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewLeaseDuration</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingLeaseDuration</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewReservedPort</name>
+          <direction>out</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>DeletePortMappingRange</name>
+      <argumentList>
+        <argument>
+          <name>NewStartPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEndPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewManage</name>
+          <direction>in</direction>
+          <relatedStateVariable>A_ARG_TYPE_Manage</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+    <action>
+      <name>GetListOfPortMappings</name>
+      <argumentList>
+        <argument>
+          <name>NewStartPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewEndPort</name>
+          <direction>in</direction>
+          <relatedStateVariable>ExternalPort</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewProtocol</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingProtocol</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewManage</name>
+          <direction>in</direction>
+          <relatedStateVariable>A_ARG_TYPE_Manage</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewNumberOfPorts</name>
+          <direction>in</direction>
+          <relatedStateVariable>PortMappingNumberOfEntries</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewPortListing</name>
+          <direction>out</direction>
+          <relatedStateVariable>A_ARG_TYPE_PortListing</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+"#;
+
+/// State variables added by WANIPConnection:2 (IGD v2).
+const WAN_IP_CONNECTION_V2_STATE_VARIABLES: &str = r#"    <stateVariable sendEvents="no">
+      <name>A_ARG_TYPE_Manage</name>
+      <dataType>boolean</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>A_ARG_TYPE_PortListing</name>
+      <dataType>string</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="yes">
+      <name>SystemUpdateID</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+"#;
+
 /// Generate the WANIPConnection SCPD XML.
-fn generate_wan_ip_connection_scpd() -> String {
-    r#"<?xml version="1.0"?>
+fn generate_wan_ip_connection_scpd(igd_version: IgdVersion) -> String {
+    let (spec_minor, v2_actions, v2_state_variables) = match igd_version {
+        IgdVersion::V1 => (0, "", ""),
+        IgdVersion::V2 => (
+            1,
+            WAN_IP_CONNECTION_V2_ACTIONS,
+            WAN_IP_CONNECTION_V2_STATE_VARIABLES,
+        ),
+    };
+    format!(
+        r#"<?xml version="1.0"?>
 <scpd xmlns="urn:schemas-upnp-org:service-1-0">
   <specVersion>
     <major>1</major>
-    <minor>0</minor>
+    <minor>{spec_minor}</minor>
   </specVersion>
   <actionList>
     <action>
@@ -493,7 +698,7 @@ fn generate_wan_ip_connection_scpd() -> String {
         </argument>
       </argumentList>
     </action>
-  </actionList>
+{v2_actions}  </actionList>
   <serviceStateTable>
     <stateVariable sendEvents="no">
       <name>ExternalIPAddress</name>
@@ -556,9 +761,9 @@ fn generate_wan_ip_connection_scpd() -> String {
       <name>PortMappingNumberOfEntries</name>
       <dataType>ui2</dataType>
     </stateVariable>
-  </serviceStateTable>
+{v2_state_variables}  </serviceStateTable>
 </scpd>"#
-        .to_string()
+    )
 }
 
 /// Generate the WANCommonInterfaceConfig SCPD XML.

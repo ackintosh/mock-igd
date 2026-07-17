@@ -46,6 +46,17 @@ pub enum Action {
     /// Get a specific port mapping entry.
     GetSpecificPortMappingEntry(GetSpecificPortMappingEntryParams),
 
+    // WANIPConnection:2 actions (IGD v2)
+    /// Add a port mapping, letting the gateway pick an alternative external
+    /// port on conflict (IGD v2 only).
+    AddAnyPortMapping(AddPortMappingParams),
+
+    /// Delete a range of port mappings (IGD v2 only).
+    DeletePortMappingRange(DeletePortMappingRangeParams),
+
+    /// Get a list of port mappings in a port range (IGD v2 only).
+    GetListOfPortMappings(GetListOfPortMappingsParams),
+
     // WANCommonInterfaceConfig actions
     /// Get common link properties.
     GetCommonLinkProperties,
@@ -79,6 +90,21 @@ impl Action {
     /// Create a GetSpecificPortMappingEntry action with matching parameters.
     pub fn get_specific_port_mapping_entry() -> GetSpecificPortMappingEntryBuilder {
         GetSpecificPortMappingEntryBuilder::default()
+    }
+
+    /// Create an AddAnyPortMapping action with matching parameters (IGD v2).
+    pub fn add_any_port_mapping() -> AddAnyPortMappingBuilder {
+        AddAnyPortMappingBuilder::default()
+    }
+
+    /// Create a DeletePortMappingRange action with matching parameters (IGD v2).
+    pub fn delete_port_mapping_range() -> DeletePortMappingRangeBuilder {
+        DeletePortMappingRangeBuilder::default()
+    }
+
+    /// Create a GetListOfPortMappings action with matching parameters (IGD v2).
+    pub fn get_list_of_port_mappings() -> GetListOfPortMappingsBuilder {
+        GetListOfPortMappingsBuilder::default()
     }
 
     /// Match any action.
@@ -251,6 +277,146 @@ impl GetSpecificPortMappingEntryBuilder {
 
 impl From<GetSpecificPortMappingEntryBuilder> for Action {
     fn from(builder: GetSpecificPortMappingEntryBuilder) -> Self {
+        builder.build()
+    }
+}
+
+// =============================================================================
+// AddAnyPortMapping (IGD v2)
+// =============================================================================
+
+/// Builder for AddAnyPortMapping matching parameters (IGD v2).
+///
+/// AddAnyPortMapping takes the same input arguments as AddPortMapping, so it
+/// reuses [`AddPortMappingParams`].
+#[derive(Debug, Clone, Default)]
+pub struct AddAnyPortMappingBuilder {
+    params: AddPortMappingParams,
+}
+
+impl AddAnyPortMappingBuilder {
+    pub fn with_external_port(mut self, port: u16) -> Self {
+        self.params.external_port = Some(port);
+        self
+    }
+
+    pub fn with_protocol(mut self, protocol: Protocol) -> Self {
+        self.params.protocol = Some(protocol);
+        self
+    }
+
+    pub fn with_internal_port(mut self, port: u16) -> Self {
+        self.params.internal_port = Some(port);
+        self
+    }
+
+    pub fn with_internal_client(mut self, client: IpAddr) -> Self {
+        self.params.internal_client = Some(client);
+        self
+    }
+
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.params.description = Some(desc.into());
+        self
+    }
+
+    pub fn build(self) -> Action {
+        Action::AddAnyPortMapping(self.params)
+    }
+}
+
+impl From<AddAnyPortMappingBuilder> for Action {
+    fn from(builder: AddAnyPortMappingBuilder) -> Self {
+        builder.build()
+    }
+}
+
+// =============================================================================
+// DeletePortMappingRange (IGD v2)
+// =============================================================================
+
+/// Parameters for matching DeletePortMappingRange requests (IGD v2).
+#[derive(Debug, Clone, Default)]
+pub struct DeletePortMappingRangeParams {
+    pub start_port: Option<u16>,
+    pub end_port: Option<u16>,
+    pub protocol: Option<Protocol>,
+}
+
+/// Builder for DeletePortMappingRange matching parameters (IGD v2).
+#[derive(Debug, Clone, Default)]
+pub struct DeletePortMappingRangeBuilder {
+    params: DeletePortMappingRangeParams,
+}
+
+impl DeletePortMappingRangeBuilder {
+    pub fn with_start_port(mut self, port: u16) -> Self {
+        self.params.start_port = Some(port);
+        self
+    }
+
+    pub fn with_end_port(mut self, port: u16) -> Self {
+        self.params.end_port = Some(port);
+        self
+    }
+
+    pub fn with_protocol(mut self, protocol: Protocol) -> Self {
+        self.params.protocol = Some(protocol);
+        self
+    }
+
+    pub fn build(self) -> Action {
+        Action::DeletePortMappingRange(self.params)
+    }
+}
+
+impl From<DeletePortMappingRangeBuilder> for Action {
+    fn from(builder: DeletePortMappingRangeBuilder) -> Self {
+        builder.build()
+    }
+}
+
+// =============================================================================
+// GetListOfPortMappings (IGD v2)
+// =============================================================================
+
+/// Parameters for matching GetListOfPortMappings requests (IGD v2).
+#[derive(Debug, Clone, Default)]
+pub struct GetListOfPortMappingsParams {
+    pub start_port: Option<u16>,
+    pub end_port: Option<u16>,
+    pub protocol: Option<Protocol>,
+}
+
+/// Builder for GetListOfPortMappings matching parameters (IGD v2).
+#[derive(Debug, Clone, Default)]
+pub struct GetListOfPortMappingsBuilder {
+    params: GetListOfPortMappingsParams,
+}
+
+impl GetListOfPortMappingsBuilder {
+    pub fn with_start_port(mut self, port: u16) -> Self {
+        self.params.start_port = Some(port);
+        self
+    }
+
+    pub fn with_end_port(mut self, port: u16) -> Self {
+        self.params.end_port = Some(port);
+        self
+    }
+
+    pub fn with_protocol(mut self, protocol: Protocol) -> Self {
+        self.params.protocol = Some(protocol);
+        self
+    }
+
+    pub fn build(self) -> Action {
+        Action::GetListOfPortMappings(self.params)
+    }
+}
+
+impl From<GetListOfPortMappingsBuilder> for Action {
+    fn from(builder: GetListOfPortMappingsBuilder) -> Self {
         builder.build()
     }
 }

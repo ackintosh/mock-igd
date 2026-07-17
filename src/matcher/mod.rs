@@ -1,7 +1,8 @@
 //! Request matching logic.
 
 use crate::action::{
-    Action, AddPortMappingParams, DeletePortMappingParams, GetGenericPortMappingEntryParams,
+    Action, AddPortMappingParams, DeletePortMappingParams, DeletePortMappingRangeParams,
+    GetGenericPortMappingEntryParams, GetListOfPortMappingsParams,
     GetSpecificPortMappingEntryParams,
 };
 
@@ -22,6 +23,9 @@ pub enum SoapRequestBody {
     DeletePortMapping(DeletePortMappingRequest),
     GetGenericPortMappingEntry(GetGenericPortMappingEntryRequest),
     GetSpecificPortMappingEntry(GetSpecificPortMappingEntryRequest),
+    AddAnyPortMapping(AddPortMappingRequest),
+    DeletePortMappingRange(DeletePortMappingRangeRequest),
+    GetListOfPortMappings(GetListOfPortMappingsRequest),
     GetCommonLinkProperties,
     GetTotalBytesReceived,
     GetTotalBytesSent,
@@ -63,6 +67,25 @@ pub struct GetSpecificPortMappingEntryRequest {
     pub protocol: String,
 }
 
+/// Parsed DeletePortMappingRange request (IGD v2).
+#[derive(Debug, Clone)]
+pub struct DeletePortMappingRangeRequest {
+    pub start_port: u16,
+    pub end_port: u16,
+    pub protocol: String,
+    pub manage: bool,
+}
+
+/// Parsed GetListOfPortMappings request (IGD v2).
+#[derive(Debug, Clone)]
+pub struct GetListOfPortMappingsRequest {
+    pub start_port: u16,
+    pub end_port: u16,
+    pub protocol: String,
+    pub manage: bool,
+    pub number_of_ports: u32,
+}
+
 /// Trait for matching requests.
 pub trait Matcher: Send + Sync {
     /// Check if this matcher matches the given request.
@@ -102,6 +125,25 @@ impl Matcher for Action {
             Action::GetSpecificPortMappingEntry(params) => match &request.body {
                 SoapRequestBody::GetSpecificPortMappingEntry(req) => {
                     matches_get_specific_port_mapping_entry(params, req)
+                }
+                _ => false,
+            },
+
+            Action::AddAnyPortMapping(params) => match &request.body {
+                SoapRequestBody::AddAnyPortMapping(req) => matches_add_port_mapping(params, req),
+                _ => false,
+            },
+
+            Action::DeletePortMappingRange(params) => match &request.body {
+                SoapRequestBody::DeletePortMappingRange(req) => {
+                    matches_delete_port_mapping_range(params, req)
+                }
+                _ => false,
+            },
+
+            Action::GetListOfPortMappings(params) => match &request.body {
+                SoapRequestBody::GetListOfPortMappings(req) => {
+                    matches_get_list_of_port_mappings(params, req)
                 }
                 _ => false,
             },
@@ -173,6 +215,50 @@ fn matches_get_generic_port_mapping_entry(
 ) -> bool {
     if let Some(index) = params.index {
         if req.index != index {
+            return false;
+        }
+    }
+    true
+}
+
+fn matches_delete_port_mapping_range(
+    params: &DeletePortMappingRangeParams,
+    req: &DeletePortMappingRangeRequest,
+) -> bool {
+    if let Some(port) = params.start_port {
+        if req.start_port != port {
+            return false;
+        }
+    }
+    if let Some(port) = params.end_port {
+        if req.end_port != port {
+            return false;
+        }
+    }
+    if let Some(protocol) = &params.protocol {
+        if req.protocol.to_uppercase() != protocol.as_str() {
+            return false;
+        }
+    }
+    true
+}
+
+fn matches_get_list_of_port_mappings(
+    params: &GetListOfPortMappingsParams,
+    req: &GetListOfPortMappingsRequest,
+) -> bool {
+    if let Some(port) = params.start_port {
+        if req.start_port != port {
+            return false;
+        }
+    }
+    if let Some(port) = params.end_port {
+        if req.end_port != port {
+            return false;
+        }
+    }
+    if let Some(protocol) = &params.protocol {
+        if req.protocol.to_uppercase() != protocol.as_str() {
             return false;
         }
     }
