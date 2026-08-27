@@ -123,6 +123,22 @@ async fn test_verify_requests() {
 }
 ```
 
+## Examples
+
+- `examples/basic.rs` — registers mocks, sends SOAP requests itself and exits:
+  `cargo run --example basic`
+- `examples/serve.rs` — starts the server and waits for requests, printing each
+  SOAP action and SSDP M-SEARCH as it arrives, until Ctrl+C. Useful for pointing
+  a real IGD client (or `curl`) at the mock:
+
+  ```console
+  $ cargo run --example serve
+  $ cargo run --example serve -- --http-port 45678 --ssdp-port 1900 --v2
+  ```
+
+  The example prints the root/description/control URLs, the SSDP address and a
+  ready-to-paste `curl` command for `GetExternalIPAddress`.
+
 ## License
 
 MIT OR Apache-2.0
