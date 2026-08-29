@@ -137,6 +137,20 @@ impl SuccessResponseBuilder {
         self
     }
 
+    /// Set the upstream max bit rate (for GetLinkLayerMaxBitRates,
+    /// WANPPPConnection).
+    pub fn with_upstream_max_bit_rate(mut self, rate: u32) -> Self {
+        self.response.upstream_max_bit_rate = Some(rate);
+        self
+    }
+
+    /// Set the downstream max bit rate (for GetLinkLayerMaxBitRates,
+    /// WANPPPConnection).
+    pub fn with_downstream_max_bit_rate(mut self, rate: u32) -> Self {
+        self.response.downstream_max_bit_rate = Some(rate);
+        self
+    }
+
     /// Build the responder.
     pub fn build(self) -> Responder {
         Responder {

@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `WANPPPConnection:1` support via
+  `MockIgdServer::builder().connection_service(..)`:
+  - `ConnectionService::Ppp` advertises
+    `urn:schemas-upnp-org:service:WANPPPConnection:1` instead of
+    `WANIPConnection`, `ConnectionService::Both` advertises both services
+    and `ConnectionService::Ip` (default) keeps the previous behavior
+  - The device description lists the PPP service with the SCPD URL
+    `/WANPPPCn.xml` and the control URL `/ctl/PPPConn`, and SSDP
+    M-SEARCH requests for `WANPPPConnection:1` are answered
+  - Only the endpoints of the advertised connection services are served,
+    and SSDP searches for a connection service the server does not expose
+    are no longer answered
+  - `WANPPPConnection` is advertised as version 1 on IGD v1 and IGD v2
+    devices, since the service is only defined in version 1
+- `GetLinkLayerMaxBitRates` action (`Action::GetLinkLayerMaxBitRates`,
+  `Responder::success().with_upstream_max_bit_rate(..)` /
+  `.with_downstream_max_bit_rate(..)`)
+- `MockIgdServer::connection_service()`, `MockIgdServer::ip_control_url()`
+  and `MockIgdServer::ppp_control_url()`; `MockIgdServer::control_url()`
+  returns the `WANPPPConnection` control URL on a PPP-only server
+
 ## [0.3.0] - 2026-07-17
 
 ### Added

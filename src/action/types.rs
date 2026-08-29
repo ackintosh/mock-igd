@@ -67,6 +67,11 @@ pub enum Action {
     /// Get total bytes sent.
     GetTotalBytesSent,
 
+    // WANPPPConnection actions
+    /// Get the upstream/downstream maximum bit rates of the PPP link
+    /// (WANPPPConnection only).
+    GetLinkLayerMaxBitRates,
+
     /// Match any action (wildcard).
     Any,
 }

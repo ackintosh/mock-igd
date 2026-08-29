@@ -38,14 +38,65 @@ impl IgdVersion {
     }
 }
 
+/// The WAN connection service(s) the mock server exposes.
+///
+/// A real gateway offers `WANIPConnection` for a routed WAN interface and
+/// `WANPPPConnection` for a PPP based one (PPPoE/PPPoA); some devices
+/// advertise both. `WANPPPConnection` is only defined in version 1, so it
+/// is advertised as `urn:schemas-upnp-org:service:WANPPPConnection:1` for
+/// both IGD v1 and IGD v2 devices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ConnectionService {
+    /// Only `WANIPConnection` (default).
+    #[default]
+    Ip,
+    /// Only `WANPPPConnection:1`.
+    Ppp,
+    /// Both `WANIPConnection` and `WANPPPConnection:1`.
+    Both,
+}
+
+impl ConnectionService {
+    /// Whether `WANIPConnection` is advertised.
+    pub fn has_ip(&self) -> bool {
+        matches!(self, ConnectionService::Ip | ConnectionService::Both)
+    }
+
+    /// Whether `WANPPPConnection` is advertised.
+    pub fn has_ppp(&self) -> bool {
+        matches!(self, ConnectionService::Ppp | ConnectionService::Both)
+    }
+}
+
+/// The device configuration shared by the HTTP and SSDP servers.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct DeviceConfig {
+    /// IGD version the server emulates.
+    pub(crate) igd_version: IgdVersion,
+    /// WAN connection service(s) the server exposes.
+    pub(crate) connection_service: ConnectionService,
+}
+
+/// Control URL path of the `WANIPConnection` service.
+pub(crate) const IP_CONNECTION_CONTROL_PATH: &str = "/ctl/IPConn";
+
+/// Control URL path of the `WANPPPConnection` service.
+pub(crate) const PPP_CONNECTION_CONTROL_PATH: &str = "/ctl/PPPConn";
+
+/// SCPD URL path of the `WANIPConnection` service.
+pub(crate) const IP_CONNECTION_SCPD_PATH: &str = "/WANIPCn.xml";
+
+/// SCPD URL path of the `WANPPPConnection` service.
+pub(crate) const PPP_CONNECTION_SCPD_PATH: &str = "/WANPPPCn.xml";
+
 /// A mock UPnP IGD server for testing.
 pub struct MockIgdServer {
     /// HTTP server address.
     http_addr: SocketAddr,
     /// SSDP server address (if enabled).
     ssdp_addr: Option<SocketAddr>,
-    /// IGD version the server emulates.
-    igd_version: IgdVersion,
+    /// Device configuration (IGD version and connection service).
+    config: DeviceConfig,
     /// Mock registry.
     registry: Arc<MockRegistry>,
     /// Shutdown signal sender.
@@ -69,8 +120,27 @@ impl MockIgdServer {
     }
 
     /// Get the control URL for SOAP actions.
+    ///
+    /// Returns the `WANPPPConnection` control URL when the server only
+    /// exposes that service, and the `WANIPConnection` control URL
+    /// otherwise. Use [`ip_control_url`](Self::ip_control_url) or
+    /// [`ppp_control_url`](Self::ppp_control_url) to address a specific
+    /// service on a server exposing both.
     pub fn control_url(&self) -> String {
-        format!("http://{}/ctl/IPConn", self.http_addr)
+        match self.config.connection_service {
+            ConnectionService::Ppp => self.ppp_control_url(),
+            _ => self.ip_control_url(),
+        }
+    }
+
+    /// Get the `WANIPConnection` control URL for SOAP actions.
+    pub fn ip_control_url(&self) -> String {
+        format!("http://{}{}", self.http_addr, IP_CONNECTION_CONTROL_PATH)
+    }
+
+    /// Get the `WANPPPConnection` control URL for SOAP actions.
+    pub fn ppp_control_url(&self) -> String {
+        format!("http://{}{}", self.http_addr, PPP_CONNECTION_CONTROL_PATH)
     }
 
     /// Get the device description URL.
@@ -90,7 +160,12 @@ impl MockIgdServer {
 
     /// Get the IGD version the server emulates.
     pub fn igd_version(&self) -> IgdVersion {
-        self.igd_version
+        self.config.igd_version
+    }
+
+    /// Get the WAN connection service(s) the server exposes.
+    pub fn connection_service(&self) -> ConnectionService {
+        self.config.connection_service
     }
 
     /// Register a mock for the given action.
@@ -191,6 +266,7 @@ pub struct MockIgdServerBuilder {
     enable_ssdp: bool,
     ssdp_port: Option<u16>,
     igd_version: IgdVersion,
+    connection_service: ConnectionService,
 }
 
 impl MockIgdServerBuilder {
@@ -203,6 +279,17 @@ impl MockIgdServerBuilder {
     /// Set the IGD version to emulate (default: [`IgdVersion::V1`]).
     pub fn igd_version(mut self, version: IgdVersion) -> Self {
         self.igd_version = version;
+        self
+    }
+
+    /// Set the WAN connection service(s) to expose
+    /// (default: [`ConnectionService::Ip`]).
+    ///
+    /// Use [`ConnectionService::Ppp`] to emulate a PPP based gateway that
+    /// advertises `urn:schemas-upnp-org:service:WANPPPConnection:1`, or
+    /// [`ConnectionService::Both`] to advertise both connection services.
+    pub fn connection_service(mut self, service: ConnectionService) -> Self {
+        self.connection_service = service;
         self
     }
 
@@ -229,16 +316,19 @@ impl MockIgdServerBuilder {
         let listener = tokio::net::TcpListener::bind(&http_addr).await?;
         let http_addr = listener.local_addr()?;
 
-        let igd_version = self.igd_version;
+        let config = DeviceConfig {
+            igd_version: self.igd_version,
+            connection_service: self.connection_service,
+        };
         let http_registry = registry.clone();
         tokio::spawn(async move {
-            http::run_http_server(listener, http_registry, igd_version, shutdown_rx).await;
+            http::run_http_server(listener, http_registry, config, shutdown_rx).await;
         });
 
         // Start SSDP server if enabled
         let ssdp_addr = if self.enable_ssdp {
             let port = self.ssdp_port.unwrap_or(1900);
-            match ssdp::start_ssdp_server(http_addr, port, igd_version, registry.clone()).await {
+            match ssdp::start_ssdp_server(http_addr, port, config, registry.clone()).await {
                 Ok(addr) => Some(addr),
                 Err(e) => {
                     tracing::warn!("Failed to start SSDP server: {}", e);
@@ -252,7 +342,7 @@ impl MockIgdServerBuilder {
         Ok(MockIgdServer {
             http_addr,
             ssdp_addr,
-            igd_version,
+            config,
             registry,
             shutdown_tx: Some(shutdown_tx),
         })

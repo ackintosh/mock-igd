@@ -1,6 +1,6 @@
 //! SSDP (Simple Service Discovery Protocol) server implementation.
 
-use super::IgdVersion;
+use super::{DeviceConfig, IgdVersion};
 use crate::Result;
 use crate::mock::{MockRegistry, ReceivedSsdpRequest};
 use socket2::{Domain, Protocol, Socket, Type};
@@ -15,7 +15,7 @@ const SSDP_MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 255, 250);
 pub async fn start_ssdp_server(
     http_addr: SocketAddr,
     port: u16,
-    igd_version: IgdVersion,
+    config: DeviceConfig,
     registry: Arc<MockRegistry>,
 ) -> Result<SocketAddr> {
     let socket = create_multicast_socket(port)?;
@@ -34,7 +34,7 @@ pub async fn start_ssdp_server(
     };
 
     tokio::spawn(async move {
-        run_ssdp_server(socket, http_addr, igd_version, registry).await;
+        run_ssdp_server(socket, http_addr, config, registry).await;
     });
 
     Ok(advertised_addr)
@@ -61,7 +61,7 @@ fn create_multicast_socket(port: u16) -> Result<Socket> {
 async fn run_ssdp_server(
     socket: UdpSocket,
     http_addr: SocketAddr,
-    igd_version: IgdVersion,
+    config: DeviceConfig,
     registry: Arc<MockRegistry>,
 ) {
     let mut buf = [0u8; 2048];
@@ -73,13 +73,14 @@ async fn run_ssdp_server(
                 if is_msearch_request(&request) {
                     // Record the request
                     let received = parse_ssdp_request(&request, src, registry.start_time());
-                    let st = response_search_target(&received.search_target, igd_version);
+                    let st = response_search_target(&received.search_target, config);
                     registry.record_ssdp_request(received).await;
 
                     // Only respond when the searched version is one we emulate.
                     if let Some(st) = st {
                         if let Err(e) =
-                            send_msearch_response(&socket, src, http_addr, igd_version, &st).await
+                            send_msearch_response(&socket, src, http_addr, config.igd_version, &st)
+                                .await
                         {
                             tracing::warn!("Failed to send M-SEARCH response: {}", e);
                         }
@@ -130,13 +131,23 @@ fn extract_header(request: &str, header: &str) -> Option<String> {
     None
 }
 
+/// Search target prefix of the WANIPConnection service.
+const WAN_IP_CONNECTION_PREFIX: &str = "urn:schemas-upnp-org:service:WANIPConnection";
+
+/// Search target prefix of the WANPPPConnection service.
+const WAN_PPP_CONNECTION_PREFIX: &str = "urn:schemas-upnp-org:service:WANPPPConnection";
+
+/// Search target prefix of the InternetGatewayDevice device type.
+const IGD_DEVICE_PREFIX: &str = "urn:schemas-upnp-org:device:InternetGatewayDevice";
+
 /// Check if the request is an M-SEARCH request for IGD.
 fn is_msearch_request(request: &str) -> bool {
     request.starts_with("M-SEARCH")
         && (request.contains("ssdp:all")
             || request.contains("upnp:rootdevice")
-            || request.contains("urn:schemas-upnp-org:device:InternetGatewayDevice")
-            || request.contains("urn:schemas-upnp-org:service:WANIPConnection"))
+            || request.contains(IGD_DEVICE_PREFIX)
+            || request.contains(WAN_IP_CONNECTION_PREFIX)
+            || request.contains(WAN_PPP_CONNECTION_PREFIX))
 }
 
 /// Determine the ST value for an M-SEARCH response.
@@ -145,25 +156,38 @@ fn is_msearch_request(request: &str) -> bool {
 /// names a device/service version this server supports: an IGD v2 device
 /// is backward compatible and answers searches for version 1 with a
 /// version 1 ST. Returns `None` when the searched version is higher than
-/// the emulated one, in which case no response must be sent.
-fn response_search_target(search_target: &str, igd_version: IgdVersion) -> Option<String> {
-    const VERSIONED_PREFIXES: [&str; 2] = [
-        "urn:schemas-upnp-org:device:InternetGatewayDevice",
-        "urn:schemas-upnp-org:service:WANIPConnection",
-    ];
-    for prefix in VERSIONED_PREFIXES {
-        if let Some(rest) = search_target.strip_prefix(prefix) {
-            let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
-            if requested <= igd_version.number() {
-                return Some(search_target.to_string());
-            }
-            return None;
+/// the emulated one, or when the searched connection service is not
+/// exposed by this server, in which case no response must be sent.
+fn response_search_target(search_target: &str, config: DeviceConfig) -> Option<String> {
+    if let Some(rest) = search_target.strip_prefix(WAN_PPP_CONNECTION_PREFIX) {
+        // WANPPPConnection only exists in version 1.
+        let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
+        if config.connection_service.has_ppp() && requested == 1 {
+            return Some(search_target.to_string());
         }
+        return None;
     }
+
+    if let Some(rest) = search_target.strip_prefix(WAN_IP_CONNECTION_PREFIX) {
+        let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
+        if config.connection_service.has_ip() && requested <= config.igd_version.number() {
+            return Some(search_target.to_string());
+        }
+        return None;
+    }
+
+    if let Some(rest) = search_target.strip_prefix(IGD_DEVICE_PREFIX) {
+        let requested: u8 = rest.strip_prefix(':').and_then(|v| v.parse().ok())?;
+        if requested <= config.igd_version.number() {
+            return Some(search_target.to_string());
+        }
+        return None;
+    }
+
     // ssdp:all, upnp:rootdevice, etc.: advertise the device's own version.
     Some(format!(
-        "urn:schemas-upnp-org:device:InternetGatewayDevice:{}",
-        igd_version.number()
+        "{IGD_DEVICE_PREFIX}:{}",
+        config.igd_version.number()
     ))
 }
 

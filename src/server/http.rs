@@ -1,6 +1,9 @@
 //! HTTP/SOAP server implementation.
 
-use super::IgdVersion;
+use super::{
+    DeviceConfig, IP_CONNECTION_CONTROL_PATH, IP_CONNECTION_SCPD_PATH, IgdVersion,
+    PPP_CONNECTION_CONTROL_PATH, PPP_CONNECTION_SCPD_PATH,
+};
 use crate::matcher::{
     AddPortMappingRequest, DeletePortMappingRangeRequest, DeletePortMappingRequest,
     GetGenericPortMappingEntryRequest, GetListOfPortMappingsRequest,
@@ -23,28 +26,41 @@ use tokio::sync::oneshot;
 /// Shared state for the HTTP server.
 struct AppState {
     registry: Arc<MockRegistry>,
-    igd_version: IgdVersion,
+    config: DeviceConfig,
 }
 
 /// Run the HTTP server.
 pub async fn run_http_server(
     listener: TcpListener,
     registry: Arc<MockRegistry>,
-    igd_version: IgdVersion,
+    config: DeviceConfig,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    let state = Arc::new(AppState {
-        registry,
-        igd_version,
-    });
+    let state = Arc::new(AppState { registry, config });
 
-    let app = Router::new()
+    // Only the connection services the device advertises are routed, so a
+    // client cannot use an endpoint the device description does not list.
+    let mut app = Router::new()
         .route("/rootDesc.xml", get(handle_root_desc))
-        .route("/WANIPCn.xml", get(handle_wan_ip_connection_scpd))
         .route("/WANCommonIFC1.xml", get(handle_wan_common_ifc_scpd))
-        .route("/ctl/IPConn", post(handle_soap_action))
-        .route("/ctl/WANCommonIFC1", post(handle_soap_action))
-        .with_state(state);
+        .route("/ctl/WANCommonIFC1", post(handle_soap_action));
+
+    if config.connection_service.has_ip() {
+        app = app
+            .route(IP_CONNECTION_SCPD_PATH, get(handle_wan_ip_connection_scpd))
+            .route(IP_CONNECTION_CONTROL_PATH, post(handle_soap_action));
+    }
+
+    if config.connection_service.has_ppp() {
+        app = app
+            .route(
+                PPP_CONNECTION_SCPD_PATH,
+                get(handle_wan_ppp_connection_scpd),
+            )
+            .route(PPP_CONNECTION_CONTROL_PATH, post(handle_soap_action));
+    }
+
+    let app = app.with_state(state);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(async move {
@@ -56,7 +72,7 @@ pub async fn run_http_server(
 
 /// Handle device description request.
 async fn handle_root_desc(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let xml = generate_device_description(state.igd_version);
+    let xml = generate_device_description(state.config);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
@@ -66,7 +82,17 @@ async fn handle_root_desc(State(state): State<Arc<AppState>>) -> impl IntoRespon
 
 /// Handle WANIPConnection SCPD request.
 async fn handle_wan_ip_connection_scpd(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let xml = generate_wan_ip_connection_scpd(state.igd_version);
+    let xml = generate_wan_ip_connection_scpd(state.config.igd_version);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
+        .body(Body::from(xml))
+        .unwrap()
+}
+
+/// Handle WANPPPConnection SCPD request.
+async fn handle_wan_ppp_connection_scpd() -> impl IntoResponse {
+    let xml = generate_wan_ppp_connection_scpd();
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "text/xml; charset=\"utf-8\"")
@@ -182,6 +208,7 @@ fn parse_soap_body(action_name: &str, body: &str) -> Result<SoapRequestBody, Str
         "GetCommonLinkProperties" => Ok(SoapRequestBody::GetCommonLinkProperties),
         "GetTotalBytesReceived" => Ok(SoapRequestBody::GetTotalBytesReceived),
         "GetTotalBytesSent" => Ok(SoapRequestBody::GetTotalBytesSent),
+        "GetLinkLayerMaxBitRates" => Ok(SoapRequestBody::GetLinkLayerMaxBitRates),
         _ => Ok(SoapRequestBody::Unknown(action_name.to_string())),
     }
 }
@@ -304,14 +331,51 @@ fn parse_get_specific_port_mapping_entry(body: &str) -> Result<SoapRequestBody, 
     ))
 }
 
+/// Generate the service entries of the WANConnectionDevice's service list.
+fn generate_connection_service_list(config: DeviceConfig) -> String {
+    let mut services = String::new();
+
+    if config.connection_service.has_ip() {
+        let version = config.igd_version.number();
+        services.push_str(&format!(
+            r#"              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:{version}</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
+                <SCPDURL>{IP_CONNECTION_SCPD_PATH}</SCPDURL>
+                <controlURL>{IP_CONNECTION_CONTROL_PATH}</controlURL>
+                <eventSubURL>/evt/IPConn</eventSubURL>
+              </service>
+"#
+        ));
+    }
+
+    if config.connection_service.has_ppp() {
+        // WANPPPConnection is only defined in version 1, also on IGD v2
+        // devices.
+        services.push_str(&format!(
+            r#"              <service>
+                <serviceType>urn:schemas-upnp-org:service:WANPPPConnection:1</serviceType>
+                <serviceId>urn:upnp-org:serviceId:WANPPPConn1</serviceId>
+                <SCPDURL>{PPP_CONNECTION_SCPD_PATH}</SCPDURL>
+                <controlURL>{PPP_CONNECTION_CONTROL_PATH}</controlURL>
+                <eventSubURL>/evt/PPPConn</eventSubURL>
+              </service>
+"#
+        ));
+    }
+
+    services
+}
+
 /// Generate the UPnP device description XML.
-fn generate_device_description(igd_version: IgdVersion) -> String {
-    let version = igd_version.number();
+fn generate_device_description(config: DeviceConfig) -> String {
+    let version = config.igd_version.number();
     // IGD v2 is based on UPnP Device Architecture 1.1.
-    let spec_minor = match igd_version {
+    let spec_minor = match config.igd_version {
         IgdVersion::V1 => 0,
         IgdVersion::V2 => 1,
     };
+    let connection_services = generate_connection_service_list(config);
     format!(
         r#"<?xml version="1.0"?>
 <root xmlns="urn:schemas-upnp-org:device-1-0">
@@ -336,14 +400,7 @@ fn generate_device_description(igd_version: IgdVersion) -> String {
             <friendlyName>WANConnectionDevice</friendlyName>
             <UDN>uuid:mock-igd-wanconn-001</UDN>
             <serviceList>
-              <service>
-                <serviceType>urn:schemas-upnp-org:service:WANIPConnection:{version}</serviceType>
-                <serviceId>urn:upnp-org:serviceId:WANIPConn1</serviceId>
-                <SCPDURL>/WANIPCn.xml</SCPDURL>
-                <controlURL>/ctl/IPConn</controlURL>
-                <eventSubURL>/evt/IPConn</eventSubURL>
-              </service>
-            </serviceList>
+{connection_services}            </serviceList>
           </device>
         </deviceList>
         <serviceList>
@@ -490,25 +547,8 @@ const WAN_IP_CONNECTION_V2_STATE_VARIABLES: &str = r#"    <stateVariable sendEve
     </stateVariable>
 "#;
 
-/// Generate the WANIPConnection SCPD XML.
-fn generate_wan_ip_connection_scpd(igd_version: IgdVersion) -> String {
-    let (spec_minor, v2_actions, v2_state_variables) = match igd_version {
-        IgdVersion::V1 => (0, "", ""),
-        IgdVersion::V2 => (
-            1,
-            WAN_IP_CONNECTION_V2_ACTIONS,
-            WAN_IP_CONNECTION_V2_STATE_VARIABLES,
-        ),
-    };
-    format!(
-        r#"<?xml version="1.0"?>
-<scpd xmlns="urn:schemas-upnp-org:service-1-0">
-  <specVersion>
-    <major>1</major>
-    <minor>{spec_minor}</minor>
-  </specVersion>
-  <actionList>
-    <action>
+/// Actions shared by WANIPConnection:1 and WANPPPConnection:1.
+const WAN_CONNECTION_COMMON_ACTIONS: &str = r#"    <action>
       <name>GetExternalIPAddress</name>
       <argumentList>
         <argument>
@@ -698,9 +738,10 @@ fn generate_wan_ip_connection_scpd(igd_version: IgdVersion) -> String {
         </argument>
       </argumentList>
     </action>
-{v2_actions}  </actionList>
-  <serviceStateTable>
-    <stateVariable sendEvents="no">
+"#;
+
+/// State variables shared by WANIPConnection:1 and WANPPPConnection:1.
+const WAN_CONNECTION_COMMON_STATE_VARIABLES: &str = r#"    <stateVariable sendEvents="no">
       <name>ExternalIPAddress</name>
       <dataType>string</dataType>
     </stateVariable>
@@ -761,8 +802,83 @@ fn generate_wan_ip_connection_scpd(igd_version: IgdVersion) -> String {
       <name>PortMappingNumberOfEntries</name>
       <dataType>ui2</dataType>
     </stateVariable>
-{v2_state_variables}  </serviceStateTable>
+"#;
+
+/// Actions specific to WANPPPConnection:1.
+const WAN_PPP_CONNECTION_ACTIONS: &str = r#"    <action>
+      <name>GetLinkLayerMaxBitRates</name>
+      <argumentList>
+        <argument>
+          <name>NewUpstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>UpstreamMaxBitRate</relatedStateVariable>
+        </argument>
+        <argument>
+          <name>NewDownstreamMaxBitRate</name>
+          <direction>out</direction>
+          <relatedStateVariable>DownstreamMaxBitRate</relatedStateVariable>
+        </argument>
+      </argumentList>
+    </action>
+"#;
+
+/// State variables specific to WANPPPConnection:1.
+const WAN_PPP_CONNECTION_STATE_VARIABLES: &str = r#"    <stateVariable sendEvents="no">
+      <name>UpstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+    <stateVariable sendEvents="no">
+      <name>DownstreamMaxBitRate</name>
+      <dataType>ui4</dataType>
+    </stateVariable>
+"#;
+
+/// Generate an SCPD document for a WAN connection service, combining the
+/// shared actions and state variables with service specific additions.
+fn generate_connection_scpd(
+    spec_minor: u8,
+    extra_actions: &str,
+    extra_state_variables: &str,
+) -> String {
+    let common_actions = WAN_CONNECTION_COMMON_ACTIONS;
+    let common_state_variables = WAN_CONNECTION_COMMON_STATE_VARIABLES;
+    format!(
+        r#"<?xml version="1.0"?>
+<scpd xmlns="urn:schemas-upnp-org:service-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>{spec_minor}</minor>
+  </specVersion>
+  <actionList>
+{common_actions}{extra_actions}  </actionList>
+  <serviceStateTable>
+{common_state_variables}{extra_state_variables}  </serviceStateTable>
 </scpd>"#
+    )
+}
+
+/// Generate the WANIPConnection SCPD XML.
+fn generate_wan_ip_connection_scpd(igd_version: IgdVersion) -> String {
+    let (spec_minor, v2_actions, v2_state_variables) = match igd_version {
+        IgdVersion::V1 => (0, "", ""),
+        IgdVersion::V2 => (
+            1,
+            WAN_IP_CONNECTION_V2_ACTIONS,
+            WAN_IP_CONNECTION_V2_STATE_VARIABLES,
+        ),
+    };
+    generate_connection_scpd(spec_minor, v2_actions, v2_state_variables)
+}
+
+/// Generate the WANPPPConnection SCPD XML.
+///
+/// WANPPPConnection is only defined in version 1, so the SCPD is the same
+/// for IGD v1 and IGD v2 devices.
+fn generate_wan_ppp_connection_scpd() -> String {
+    generate_connection_scpd(
+        0,
+        WAN_PPP_CONNECTION_ACTIONS,
+        WAN_PPP_CONNECTION_STATE_VARIABLES,
     )
 }
 
