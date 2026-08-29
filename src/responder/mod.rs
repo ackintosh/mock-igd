@@ -69,6 +69,10 @@ pub(crate) struct SuccessResponse {
 
     // GetListOfPortMappings (IGD v2)
     pub(crate) port_listing: Option<String>,
+
+    // GetLinkLayerMaxBitRates (WANPPPConnection)
+    pub(crate) upstream_max_bit_rate: Option<u32>,
+    pub(crate) downstream_max_bit_rate: Option<u32>,
 }
 
 impl Responder {

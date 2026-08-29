@@ -29,6 +29,7 @@ pub enum SoapRequestBody {
     GetCommonLinkProperties,
     GetTotalBytesReceived,
     GetTotalBytesSent,
+    GetLinkLayerMaxBitRates,
     Unknown(String),
 }
 
@@ -158,6 +159,10 @@ impl Matcher for Action {
 
             Action::GetTotalBytesSent => {
                 matches!(request.body, SoapRequestBody::GetTotalBytesSent)
+            }
+
+            Action::GetLinkLayerMaxBitRates => {
+                matches!(request.body, SoapRequestBody::GetLinkLayerMaxBitRates)
             }
         }
     }

@@ -7,6 +7,7 @@ A mock UPnP Internet Gateway Device (IGD) server for testing client implementati
 - SSDP discovery response (M-SEARCH)
 - SOAP action handling (GetExternalIPAddress, AddPortMapping, etc.)
 - IGD v1 (InternetGatewayDevice:1) and IGD v2 (InternetGatewayDevice:2) emulation
+- WANIPConnection and WANPPPConnection connection services
 - Flexible behavior definition with Matcher + Responder pattern
 - Request recording for test verification
 - Async/await support with Tokio
@@ -98,6 +99,53 @@ async fn test_igd_v2() {
             .with_external_port(8080)
             .with_protocol("TCP")
             .with_internal_client("192.168.1.100")
+    ).await;
+}
+```
+
+## WANPPPConnection
+
+By default the server exposes the `WANIPConnection` service. Use
+`connection_service` to emulate a PPP based gateway that advertises
+`urn:schemas-upnp-org:service:WANPPPConnection:1` instead, or
+`ConnectionService::Both` to advertise both services. `WANPPPConnection`
+is only defined in version 1, so it is advertised as version 1 on IGD v1
+and IGD v2 devices alike.
+
+A PPP server answers SSDP searches for `WANPPPConnection:1`, advertises
+the service in the device description (SCPD `/WANPPPCn.xml`, control URL
+`/ctl/PPPConn`) and accepts SOAP requests with the `WANPPPConnection:1`
+service type, echoing it in the response namespace. Only the endpoints of
+the advertised services are served: a PPP-only server responds with 404
+on the `WANIPConnection` endpoints and does not answer SSDP searches for
+`WANIPConnection`, and vice versa.
+
+Registered mocks are matched by action, so the same mocks apply to both
+connection services.
+
+```rust
+use mock_igd::{MockIgdServer, ConnectionService, Action, Responder};
+
+#[tokio::test]
+async fn test_ppp_connection() {
+    let server = MockIgdServer::builder()
+        .connection_service(ConnectionService::Ppp)
+        .start()
+        .await
+        .unwrap();
+
+    // server.control_url() points at /ctl/PPPConn
+    server.mock(
+        Action::GetExternalIPAddress,
+        Responder::success().with_external_ip("203.0.113.1".parse().unwrap())
+    ).await;
+
+    // GetLinkLayerMaxBitRates is a WANPPPConnection-only action
+    server.mock(
+        Action::GetLinkLayerMaxBitRates,
+        Responder::success()
+            .with_upstream_max_bit_rate(1_000_000)
+            .with_downstream_max_bit_rate(8_000_000)
     ).await;
 }
 ```

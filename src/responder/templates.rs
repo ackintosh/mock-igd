@@ -38,6 +38,7 @@ fn default_service_type(action_name: &str) -> &'static str {
         "GetCommonLinkProperties" | "GetTotalBytesReceived" | "GetTotalBytesSent" => {
             "urn:schemas-upnp-org:service:WANCommonInterfaceConfig:1"
         }
+        "GetLinkLayerMaxBitRates" => "urn:schemas-upnp-org:service:WANPPPConnection:1",
         _ => "urn:schemas-upnp-org:service:WANIPConnection:1",
     }
 }
@@ -71,6 +72,7 @@ pub(crate) fn generate_success_response(
         "GetCommonLinkProperties" => generate_get_common_link_properties_response(ns, data),
         "GetTotalBytesReceived" => generate_get_total_bytes_received_response(ns, data),
         "GetTotalBytesSent" => generate_get_total_bytes_sent_response(ns, data),
+        "GetLinkLayerMaxBitRates" => generate_get_link_layer_max_bit_rates_response(ns, data),
         _ => generate_empty_response(action_name, ns),
     };
 
@@ -224,6 +226,17 @@ fn generate_get_common_link_properties_response(ns: &str, data: &SuccessResponse
 <NewLayer1DownstreamMaxBitRate>{downstream}</NewLayer1DownstreamMaxBitRate>
 <NewPhysicalLinkStatus>{status}</NewPhysicalLinkStatus>
 </u:GetCommonLinkPropertiesResponse>"#
+    )
+}
+
+fn generate_get_link_layer_max_bit_rates_response(ns: &str, data: &SuccessResponse) -> String {
+    let upstream = data.upstream_max_bit_rate.unwrap_or(10000000);
+    let downstream = data.downstream_max_bit_rate.unwrap_or(100000000);
+    format!(
+        r#"<u:GetLinkLayerMaxBitRatesResponse xmlns:u="{ns}">
+<NewUpstreamMaxBitRate>{upstream}</NewUpstreamMaxBitRate>
+<NewDownstreamMaxBitRate>{downstream}</NewDownstreamMaxBitRate>
+</u:GetLinkLayerMaxBitRatesResponse>"#
     )
 }
 
