@@ -51,7 +51,18 @@ fn create_multicast_socket(port: u16) -> Result<Socket> {
     let addr = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
     socket.bind(&addr.into())?;
 
+    // Join the SSDP group on the default multicast interface. `UNSPECIFIED`
+    // lets the kernel pick that interface from the routing table, which is the
+    // one holding the default route and never the loopback one. Join on
+    // loopback as well, so an M-SEARCH sent over `lo0` also arrives: a client
+    // pinned to the loopback interface (`upnpc -m 127.0.0.1`) is the only way
+    // to run a discovery that a real gateway on the LAN cannot answer first.
     socket.join_multicast_v4(&SSDP_MULTICAST_ADDR, &Ipv4Addr::UNSPECIFIED)?;
+    if let Err(e) = socket.join_multicast_v4(&SSDP_MULTICAST_ADDR, &Ipv4Addr::LOCALHOST) {
+        // Not fatal: some hosts have no multicast-capable loopback interface.
+        tracing::debug!("Failed to join SSDP multicast group on loopback: {}", e);
+    }
+
     socket.set_nonblocking(true)?;
 
     Ok(socket)
